@@ -113,8 +113,10 @@ int main(int argc, char* argv[]) {
 
         float canvasWidth = contentSize.x;
 
-        // §5 — 上方：时间序列曲线（传入上一帧悬停的火焰图节点，叠加显示其曲线）
-        timelineView.draw(canvasWidth, timelineHeight, prevHoveredNode);
+        // §5 — 上方：时间序列曲线
+        // 传入上一帧悬停的火焰图节点叠加显示其曲线，以及当前缩放聚焦节点切换主曲线
+        const FlameNode* focusNode = flameView.getZoomedNode();
+        timelineView.draw(canvasWidth, timelineHeight, prevHoveredNode, focusNode);
 
         // §4/6 — 下方：火焰图
         // 火焰图区域紧贴上方曲线图的下边缘

@@ -17,11 +17,17 @@ void TimelineView::init(const FlameNode& root) {
         minTime_ = times_.front();
         maxTime_ = times_.back();
         cursorTime_ = minTime_;  // §5.2 初始位置 = 最小时间
+
+        // 预计算 Y 轴最大值，用于固定 Y 轴范围，避免曲线切换时轴范围跳变
+        maxValue_ = 0.0;
+        for (size_t i = 0; i < values_.size(); ++i) {
+            if (values_[i] > maxValue_) maxValue_ = values_[i];
+        }
     }
 }
 
 // §5.1/5.2 — 绘制时间序列曲线 + 游标 + 拖拽选区
-void TimelineView::draw(float availableWidth, float availableHeight, const FlameNode* hoveredNode) {
+void TimelineView::draw(float availableWidth, float availableHeight, const FlameNode* hoveredNode, const FlameNode* focusNode) {
     if (times_.empty()) return;
 
     // Escape 或右键 取消选区
@@ -40,16 +46,31 @@ void TimelineView::draw(float availableWidth, float availableHeight, const Flame
                           ImPlotFlags_NoTitle | ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect)) {
         firstFrame_ = false;
 
-        ImPlot::SetupAxes("Time (s)", "Inclusive Cost", ImPlotAxisFlags_None, ImPlotAxisFlags_AutoFit);
+        ImPlot::SetupAxes("Time (s)", "Inclusive Cost", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
+        // Y 轴固定范围 [0, maxValue_]，避免曲线切换时轴范围跳变晃眼
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, maxValue_ * 1.05, ImPlotCond_Always);
         // 限制 X 轴：不允许平移超出数据边界，不允许缩小到超出数据全范围
         ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, minTime_, maxTime_);
         ImPlot::SetupAxisZoomConstraints(ImAxis_X1, 0, maxTime_ - minTime_);
 
         // §5.1 — 阶梯线绘制
-        ImPlot::PlotStairs("root inclusive", times_.data(), values_.data(), (int)times_.size());
+        // 如果有焦点节点（火焰图缩放状态），主曲线切换为焦点节点的 inclusive 曲线，替换掉 root
+        if (focusNode != nullptr) {
+            focusValues_.resize(times_.size());
+            for (size_t i = 0; i < times_.size(); ++i) {
+                focusValues_[i] = inclusive(*focusNode, times_[i]);
+            }
+            // 焦点节点曲线替换 root 作为主曲线，显式指定蓝色与 hover 橙色区分
+            ImPlotSpec focusSpec;
+            focusSpec.LineColor = ImVec4(0.4f, 0.7f, 1.0f, 1.0f);
+            focusSpec.LineWeight = 1.5f;
+            ImPlot::PlotStairs(focusNode->name.c_str(), times_.data(), focusValues_.data(), (int)times_.size(), focusSpec);
+        } else {
+            ImPlot::PlotStairs("root inclusive", times_.data(), values_.data(), (int)times_.size());
+        }
 
         // 悬停节点的叠加曲线（颜色较淡，半透明，以示区分）
-        if (hoveredNode != nullptr) {
+        if (hoveredNode != nullptr && hoveredNode != focusNode) {
             hoverValues_.resize(times_.size());
             for (size_t i = 0; i < times_.size(); ++i) {
                 hoverValues_[i] = inclusive(*hoveredNode, times_[i]);

@@ -64,4 +64,7 @@ private:
 public:
     // 获取当前悬停的节点（可能为 nullptr）
     const FlameNode* getHoveredNode() const { return hoveredNode_; }
+
+    // 获取当前缩放聚焦的节点（可能为 nullptr，表示无缩放）
+    const FlameNode* getZoomedNode() const { return zoomedNode_; }
 };
