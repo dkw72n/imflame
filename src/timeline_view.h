@@ -11,7 +11,8 @@ public:
 
     // 绘制时间序列曲线 + 游标，返回当前游标时间
     // availableHeight: 分配给此视图的高度
-    void draw(float availableWidth, float availableHeight);
+    // hoveredNode: 火焰图中当前悬停的节点（可为 nullptr），用于叠加显示其曲线
+    void draw(float availableWidth, float availableHeight, const FlameNode* hoveredNode = nullptr);
 
     // 获取当前游标时间
     double getCursorTime() const { return cursorTime_; }
@@ -39,4 +40,7 @@ private:
     double rangeT0_ = 0.0;       // 选区起始（较小值）
     double rangeT1_ = 0.0;       // 选区结束（较大值）
     bool firstFrame_ = true;     // 首帧标记，用于仅首次自适应轴范围
+
+    // 悬停节点曲线数据缓冲区（每帧按需填充，避免重复分配）
+    std::vector<double> hoverValues_;
 };

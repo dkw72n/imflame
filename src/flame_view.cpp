@@ -44,8 +44,9 @@ void FlameView::draw(const FlameNode& root, double t, ImVec2 canvasPos, float ca
         return; // 显示空白，不崩溃
     }
 
-    // 重置本帧双击检测
+    // 重置本帧双击检测和悬停检测
     doubleClickedNode_ = nullptr;
+    hoveredNode_ = nullptr;
 
     ImDrawList* drawList = ImGui::GetWindowDrawList();
 
@@ -92,6 +93,9 @@ void FlameView::draw(const FlameNode& root, double t, ImVec2 canvasPos, float ca
                     ImGui::Text("Inclusive:   %.2f", ancestorIncl);
                     ImGui::Text("%% of root:  %.1f%%", (ancestorIncl / rootIncl) * 100.0);
                     ImGui::EndTooltip();
+
+                    // 记录悬停节点
+                    hoveredNode_ = ancestor;
 
                     // 双击祖先 → 缩放到该祖先
                     if (ImGui::IsMouseDoubleClicked(0)) {
@@ -193,6 +197,9 @@ void FlameView::drawNode(ImDrawList* drawList, const FlameNode& node, double t,
         }
         ImGui::EndTooltip();
 
+        // 记录悬停节点
+        hoveredNode_ = &node;
+
         // 双击 → 记录被双击的节点
         if (ImGui::IsMouseDoubleClicked(0)) {
             doubleClickedNode_ = &node;
@@ -281,8 +288,9 @@ void FlameView::drawDiff(const FlameNode& root, double t0, double t1,
     double maxAbsDelta = findMaxAbsDelta(root, t0, t1);
     if (maxAbsDelta < 1e-12) maxAbsDelta = 1.0; // 避免除零
 
-    // 重置本帧双击检测
+    // 重置本帧双击检测和悬停检测
     doubleClickedNode_ = nullptr;
+    hoveredNode_ = nullptr;
 
     ImDrawList* drawList = ImGui::GetWindowDrawList();
 
@@ -329,6 +337,9 @@ void FlameView::drawDiff(const FlameNode& root, double t0, double t1,
                     ImGui::Text("Delta %%:  %+.1f%%",
                                 ancestorIncl0 > 0.0 ? (delta / ancestorIncl0) * 100.0 : 0.0);
                     ImGui::EndTooltip();
+
+                    // 记录悬停节点
+                    hoveredNode_ = ancestor;
 
                     if (ImGui::IsMouseDoubleClicked(0)) {
                         doubleClickedNode_ = ancestor;
@@ -418,6 +429,9 @@ void FlameView::drawNodeDiff(ImDrawList* drawList, const FlameNode& node, double
         }
         ImGui::Text("%% of root(t1): %.1f%%", (nodeIncl1 / rootInclusive) * 100.0);
         ImGui::EndTooltip();
+
+        // 记录悬停节点
+        hoveredNode_ = &node;
 
         if (ImGui::IsMouseDoubleClicked(0)) {
             doubleClickedNode_ = &node;

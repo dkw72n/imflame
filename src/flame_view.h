@@ -57,4 +57,11 @@ private:
 
     // 记录本帧被双击的节点（用于在递归结束后统一处理）
     const FlameNode* doubleClickedNode_ = nullptr;
+
+    // 当前帧鼠标悬停的火焰图节点（用于时间轴叠加曲线）
+    const FlameNode* hoveredNode_ = nullptr;
+
+public:
+    // 获取当前悬停的节点（可能为 nullptr）
+    const FlameNode* getHoveredNode() const { return hoveredNode_; }
 };

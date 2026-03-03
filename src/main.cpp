@@ -81,6 +81,9 @@ int main(int argc, char* argv[]) {
 
     FlameView flameView;
 
+    // 上一帧火焰图中悬停的节点（用于在时间轴叠加曲线，延迟一帧视觉上无感知）
+    const FlameNode* prevHoveredNode = nullptr;
+
     // 主循环
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -110,8 +113,8 @@ int main(int argc, char* argv[]) {
 
         float canvasWidth = contentSize.x;
 
-        // §5 — 上方：时间序列曲线
-        timelineView.draw(canvasWidth, timelineHeight);
+        // §5 — 上方：时间序列曲线（传入上一帧悬停的火焰图节点，叠加显示其曲线）
+        timelineView.draw(canvasWidth, timelineHeight, prevHoveredNode);
 
         // §4/6 — 下方：火焰图
         // 火焰图区域紧贴上方曲线图的下边缘
@@ -127,6 +130,9 @@ int main(int argc, char* argv[]) {
             double t = timelineView.getCursorTime();
             flameView.draw(root, t, flameCursorPos, canvasWidth);
         }
+
+        // 记录本帧悬停节点，供下一帧时间轴使用
+        prevHoveredNode = flameView.getHoveredNode();
 
         // 为火焰图预留空间（使滚动条正确工作）
         ImGui::Dummy(ImVec2(canvasWidth, flameHeight));

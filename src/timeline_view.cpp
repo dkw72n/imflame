@@ -21,7 +21,7 @@ void TimelineView::init(const FlameNode& root) {
 }
 
 // §5.1/5.2 — 绘制时间序列曲线 + 游标 + 拖拽选区
-void TimelineView::draw(float availableWidth, float availableHeight) {
+void TimelineView::draw(float availableWidth, float availableHeight, const FlameNode* hoveredNode) {
     if (times_.empty()) return;
 
     // Escape 或右键 取消选区
@@ -47,6 +47,20 @@ void TimelineView::draw(float availableWidth, float availableHeight) {
 
         // §5.1 — 阶梯线绘制
         ImPlot::PlotStairs("root inclusive", times_.data(), values_.data(), (int)times_.size());
+
+        // 悬停节点的叠加曲线（颜色较淡，半透明，以示区分）
+        if (hoveredNode != nullptr) {
+            hoverValues_.resize(times_.size());
+            for (size_t i = 0; i < times_.size(); ++i) {
+                hoverValues_[i] = inclusive(*hoveredNode, times_[i]);
+            }
+
+            // 用较淡的橙色绘制悬停节点曲线，与主曲线区分
+            ImPlotSpec hoverSpec;
+            hoverSpec.LineColor = ImVec4(1.0f, 0.6f, 0.2f, 0.7f);
+            hoverSpec.LineWeight = 1.5f;
+            ImPlot::PlotStairs(hoveredNode->name.c_str(), times_.data(), hoverValues_.data(), (int)times_.size(), hoverSpec);
+        }
 
         // === 拖拽选区交互（左键拖拽）===
         if (ImPlot::IsPlotHovered()) {
