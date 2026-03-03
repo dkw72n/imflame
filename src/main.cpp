@@ -112,8 +112,17 @@ int main(int argc, char* argv[]) {
         // §4/6 — 下方：火焰图
         // 火焰图区域紧贴上方曲线图的下边缘
         ImVec2 flameCursorPos = ImGui::GetCursorScreenPos();
-        double t = timelineView.getCursorTime();
-        flameView.draw(root, t, flameCursorPos, canvasWidth);
+
+        if (timelineView.isRangeSelected()) {
+            // Diff 模式：按选区 (t0, t1) 绘制差异火焰图
+            double t0 = timelineView.getRangeT0();
+            double t1 = timelineView.getRangeT1();
+            flameView.drawDiff(root, t0, t1, flameCursorPos, canvasWidth);
+        } else {
+            // 普通模式：按游标时间绘制
+            double t = timelineView.getCursorTime();
+            flameView.draw(root, t, flameCursorPos, canvasWidth);
+        }
 
         // 为火焰图预留空间（使滚动条正确工作）
         ImGui::Dummy(ImVec2(canvasWidth, flameHeight));

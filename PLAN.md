@@ -97,11 +97,14 @@
 | 4.2 | 悬停高亮 | 鼠标在色块上 → 白色 2px 边框 | §6.3 |
 | 4.3 | Tooltip | 显示 Name / Self cost / Inclusive / % of root / % of parent | §6.3, §9 用例 5 |
 | 4.4 | 双击放大 | 双击色块 → 该节点水平放大充满 X 轴，显示祖先面包屑，双击已放大节点/根节点回退 | §6.3, §9 用例 7 |
+| 4.5 | 时间范围选区 | 时间轴 Shift + 拖拽选择时间范围 `[t0, t1]`，绘制选区矩形，Esc/右键取消 | §5.3 |
+| 4.6 | Diff 模式火焰图 | 选区激活时切换为 diff 渲染，尺寸按 t1，颜色按 delta 映射红/蓝/灰 | §6.4, §9 用例 8 |
 
 ### 产出文件
-- 修改 `src/flame_view.h` — 添加缩放状态（zoomedNode_、zoomPath_）、findNodePath()
-- 修改 `src/flame_view.cpp` — 添加交互逻辑、缩放渲染、祖先面包屑
-- 修改 `src/main.cpp` — 联动状态管理
+- 修改 `src/timeline_view.h / .cpp` — 添加拖拽选区状态和交互
+- 修改 `src/flame_view.h` — 添加缩放状态（zoomedNode_、zoomPath_）、findNodePath()、diffColor()、drawDiff()、drawNodeDiff()、findMaxAbsDelta()
+- 修改 `src/flame_view.cpp` — 添加交互逻辑、缩放渲染、祖先面包屑、Diff 模式渲染
+- 修改 `src/main.cpp` — 联动状态管理、普通/Diff 模式切换
 
 ---
 
@@ -122,7 +125,7 @@
 
 | # | 任务 | 说明 | 对应 SPEC |
 |---|------|------|-----------|
-| 6.1 | 逐条过验收用例 | 用例 1–7 | §9 |
+| 6.1 | 逐条过验收用例 | 用例 1–8 | §9 |
 | 6.2 | 边界情况处理 | 空 JSON / 单节点 / root inclusive = 0 不崩溃 | §9 用例 6 |
 | 6.3 | 代码清理与文档 | 注释、README 更新 | — |
 
@@ -137,3 +140,4 @@
 | 5 | Tooltip 内容 | 悬停色块 → 数值与手动计算一致 |
 | 6 | 零值处理 | root inclusive = 0 时显示空白，不崩溃 |
 | 7 | 双击放大 | 双击 `child_b` → 放大充满 X 轴 → 显示祖先面包屑 → 双击回退到全局视图 |
+| 8 | Diff 模式 | Shift+拖拽选区 → diff 火焰图显示红/蓝/灰色块 → Tooltip 显示 t0/t1 对比 → Esc 取消 |
