@@ -48,33 +48,39 @@ void TimelineView::draw(float availableWidth, float availableHeight) {
         // §5.1 — 阶梯线绘制
         ImPlot::PlotStairs("root inclusive", times_.data(), values_.data(), (int)times_.size());
 
-        // === 拖拽选区交互 ===
+        // === 拖拽选区交互（左键拖拽）===
         if (ImPlot::IsPlotHovered()) {
             ImPlotPoint mp = ImPlot::GetPlotMousePos();
 
-            // 按住 Shift + 左键拖拽 开始选区
-            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::GetIO().KeyShift) {
+            // 左键按下开始拖拽
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                 dragging_ = true;
                 dragStartTime_ = mp.x;
                 dragEndTime_ = mp.x;
                 rangeSelected_ = false;
             }
+        }
 
-            if (dragging_) {
-                dragEndTime_ = mp.x;
+        if (dragging_) {
+            ImPlotPoint mp = ImPlot::GetPlotMousePos();
+            dragEndTime_ = mp.x;
 
-                if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-                    dragging_ = false;
-                    // 确保 t0 < t1，且有足够宽度
-                    double t0 = std::min(dragStartTime_, dragEndTime_);
-                    double t1 = std::max(dragStartTime_, dragEndTime_);
-                    t0 = std::max(t0, minTime_);
-                    t1 = std::min(t1, maxTime_);
-                    if (std::abs(t1 - t0) > 1e-9) {
-                        rangeSelected_ = true;
-                        rangeT0_ = t0;
-                        rangeT1_ = t1;
-                    }
+            if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+                dragging_ = false;
+                double t0 = std::min(dragStartTime_, dragEndTime_);
+                double t1 = std::max(dragStartTime_, dragEndTime_);
+                t0 = std::max(t0, minTime_);
+                t1 = std::min(t1, maxTime_);
+                if (std::abs(t1 - t0) > 1e-9) {
+                    // 拖拽距离足够大，视为选区
+                    rangeSelected_ = true;
+                    rangeT0_ = t0;
+                    rangeT1_ = t1;
+                } else {
+                    // 拖拽距离很小，视为点击定位游标
+                    cursorTime_ = mp.x;
+                    if (cursorTime_ < minTime_) cursorTime_ = minTime_;
+                    if (cursorTime_ > maxTime_) cursorTime_ = maxTime_;
                 }
             }
         }
@@ -102,38 +108,20 @@ void TimelineView::draw(float availableWidth, float availableHeight) {
                                ImVec2(5, -15), true, "%s", labelT1);
         }
 
-        // 非选区模式下：游标和点击
+        // 非选区模式下：显示游标线和标签
         if (!rangeSelected_ && !dragging_) {
-            // §5.2 — 可拖动游标
-            if (ImPlot::DragLineX(0, &cursorTime_, ImVec4(1, 1, 0, 1), 1.0f,
-                                  ImPlotDragToolFlags_None)) {
-                // 游标被拖动
-            }
-
-            // §5.2 — 限制游标范围
-            if (cursorTime_ < minTime_) cursorTime_ = minTime_;
-            if (cursorTime_ > maxTime_) cursorTime_ = maxTime_;
-
-            // §5.2 — 点击定位游标（非 Shift 时）
-            if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(0) && !ImGui::GetIO().KeyShift) {
-                ImPlotPoint mp = ImPlot::GetPlotMousePos();
-                cursorTime_ = mp.x;
-                if (cursorTime_ < minTime_) cursorTime_ = minTime_;
-                if (cursorTime_ > maxTime_) cursorTime_ = maxTime_;
-            }
+            // §5.2 — 游标竖线（只读显示，不再使用 DragLineX 以免与拖拽选区冲突）
+            ImPlotRect plotLimits = ImPlot::GetPlotLimits();
+            ImVec2 lineTop = ImPlot::PlotToPixels(cursorTime_, plotLimits.Y.Max);
+            ImVec2 lineBot = ImPlot::PlotToPixels(cursorTime_, plotLimits.Y.Min);
+            ImDrawList* drawList = ImPlot::GetPlotDrawList();
+            drawList->AddLine(lineTop, lineBot, IM_COL32(255, 255, 0, 255), 1.0f);
 
             // §5.2 — 游标标签
-            {
-                ImPlotPoint annotationPos;
-                annotationPos.x = cursorTime_;
-                ImPlotRect plotLimits = ImPlot::GetPlotLimits();
-                annotationPos.y = plotLimits.Y.Max;
-
-                char label[64];
-                snprintf(label, sizeof(label), "t = %.3fs", cursorTime_);
-                ImPlot::Annotation(annotationPos.x, annotationPos.y, ImVec4(1, 1, 0, 1),
-                                   ImVec2(10, 10), true, "%s", label);
-            }
+            char label[64];
+            snprintf(label, sizeof(label), "t = %.3fs", cursorTime_);
+            ImPlot::Annotation(cursorTime_, plotLimits.Y.Max, ImVec4(1, 1, 0, 1),
+                               ImVec2(10, 10), true, "%s", label);
         }
 
         ImPlot::EndPlot();
@@ -146,6 +134,6 @@ void TimelineView::draw(float availableWidth, float availableHeight) {
             rangeT0_, rangeT1_);
     } else {
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
-            "Hold Shift + Drag to select time range for Diff mode");
+            "Click to set cursor, Drag to select time range for Diff mode");
     }
 }
