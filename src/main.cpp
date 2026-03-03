@@ -64,6 +64,10 @@ int main(int argc, char* argv[]) {
     ImGui::CreateContext();
     ImPlot::CreateContext();
 
+    // 将 ImPlot 默认的左键平移改为中键平移，避免与选区拖拽和游标点击冲突
+    ImPlotInputMap& inputMap = ImPlot::GetInputMap();
+    inputMap.Pan = ImGuiMouseButton_Middle;
+
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();

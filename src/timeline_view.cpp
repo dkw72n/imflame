@@ -32,11 +32,18 @@ void TimelineView::draw(float availableWidth, float availableHeight) {
         }
     }
 
-    ImPlot::SetNextAxesToFit();
+    // 仅首帧自适应轴范围，之后允许用户自由缩放/平移
+    if (firstFrame_) {
+        ImPlot::SetNextAxesToFit();
+    }
     if (ImPlot::BeginPlot("##Timeline", ImVec2(availableWidth, availableHeight),
                           ImPlotFlags_NoTitle | ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect)) {
+        firstFrame_ = false;
 
         ImPlot::SetupAxes("Time (s)", "Inclusive Cost", ImPlotAxisFlags_None, ImPlotAxisFlags_AutoFit);
+        // 限制 X 轴：不允许平移超出数据边界，不允许缩小到超出数据全范围
+        ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, minTime_, maxTime_);
+        ImPlot::SetupAxisZoomConstraints(ImAxis_X1, 0, maxTime_ - minTime_);
 
         // §5.1 — 阶梯线绘制
         ImPlot::PlotStairs("root inclusive", times_.data(), values_.data(), (int)times_.size());

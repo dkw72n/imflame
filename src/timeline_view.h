@@ -38,4 +38,5 @@ private:
     bool rangeSelected_ = false;  // 是否有有效选区
     double rangeT0_ = 0.0;       // 选区起始（较小值）
     double rangeT1_ = 0.0;       // 选区结束（较大值）
+    bool firstFrame_ = true;     // 首帧标记，用于仅首次自适应轴范围
 };
