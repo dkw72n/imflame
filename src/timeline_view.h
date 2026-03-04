@@ -2,6 +2,11 @@
 
 #include "flame_data.h"
 #include <vector>
+#include <unordered_map>
+#include <atomic>
+#include <memory>
+#include <thread>
+#include <mutex>
 
 // §5 — 时间序列曲线视图
 class TimelineView {
@@ -51,11 +56,31 @@ private:
     double rangeT1_ = 0.0;       // 选区结束（较大值）
     bool firstFrame_ = true;     // 首帧标记，用于仅首次自适应轴范围
 
-    // 悬停节点曲线数据缓存
-    const FlameNode* lastHoveredNode_ = nullptr;
-    CurveData hoverCurve_;
+    // §8.1 — 高精度曲线永久缓存
+    std::unordered_map<const FlameNode*, CurveData> curveCache_;
     
-    // 焦点节点曲线数据缓存
-    const FlameNode* lastFocusNode_ = nullptr;
-    CurveData focusCurve_;
+    // §8.2 — 渐进式渲染 (LOD)
+    // 快速生成低精度曲线（100个点），用于首次 Hover 时的瞬间反馈
+    CurveData buildLowResCurve(const FlameNode& node) const;
+    
+    // 获取曲线：如果缓存有高精度则返回高精度，否则返回实时计算的低精度曲线，并触发异步计算
+    CurveData getCurveProgressive(const FlameNode* node);
+
+    // §8.3 — 异步高精度计算状态
+    struct AsyncState {
+        std::atomic<bool> cancelFlag{false};
+        std::atomic<bool> isReady{false};
+        const FlameNode* targetNode = nullptr;
+        CurveData result;
+    };
+    std::shared_ptr<AsyncState> currentAsyncState_;
+    
+    // 检查异步任务是否完成，若完成则存入缓存
+    void checkAsyncResult();
+    
+    // 启动异步计算任务
+    void startAsyncBuild(const FlameNode* node);
+    
+    // 带有中断检查的高精度计算
+    CurveData buildInclusiveCurveAsync(const FlameNode& node, std::atomic<bool>& cancelFlag);
 };

@@ -6,15 +6,17 @@
 #include <cmath>
 #include <queue>
 
-TimelineView::CurveData TimelineView::buildInclusiveCurve(const FlameNode& node) {
+TimelineView::CurveData TimelineView::buildInclusiveCurveAsync(const FlameNode& node, std::atomic<bool>& cancelFlag) {
     std::vector<const FlameNode*> nodes;
     auto collect = [&](auto& self, const FlameNode& n) -> void {
+        if (cancelFlag.load(std::memory_order_relaxed)) return;
         nodes.push_back(&n);
         for (uint32_t i = 0; i < n.child_count; ++i) {
             self(self, n.children[i]);
         }
     };
     collect(collect, node);
+    if (cancelFlag.load(std::memory_order_relaxed)) return {};
 
     struct IteratorState {
         const Sample* current;
@@ -43,7 +45,14 @@ TimelineView::CurveData TimelineView::buildInclusiveCurve(const FlameNode& node)
     std::vector<double> current_vals(nodes.size(), 0.0);
     double current_sum = 0.0;
 
+    int loop_counter = 0;
     while (!pq.empty()) {
+        // 每处理 1000 个事件检查一次中断标志
+        if (++loop_counter > 1000) {
+            if (cancelFlag.load(std::memory_order_relaxed)) return {};
+            loop_counter = 0;
+        }
+
         double t = pq.top().current->time;
         
         // Process all events at time t
@@ -65,6 +74,8 @@ TimelineView::CurveData TimelineView::buildInclusiveCurve(const FlameNode& node)
         curve.times.push_back(t);
         curve.values.push_back(current_sum);
     }
+
+    if (cancelFlag.load(std::memory_order_relaxed)) return {};
 
     // §7.3 — 曲线数据降采样 (LOD)
     constexpr size_t MAX_POINTS = 4000;
@@ -124,6 +135,78 @@ TimelineView::CurveData TimelineView::buildInclusiveCurve(const FlameNode& node)
     return curve;
 }
 
+TimelineView::CurveData TimelineView::buildInclusiveCurve(const FlameNode& node) {
+    std::atomic<bool> dummyFlag{false};
+    return buildInclusiveCurveAsync(node, dummyFlag);
+}
+
+TimelineView::CurveData TimelineView::buildLowResCurve(const FlameNode& node) const {
+    CurveData curve;
+    constexpr int LOW_RES_POINTS = 100;
+    curve.times.reserve(LOW_RES_POINTS);
+    curve.values.reserve(LOW_RES_POINTS);
+
+    if (maxTime_ > minTime_) {
+        double step = (maxTime_ - minTime_) / (LOW_RES_POINTS - 1);
+        for (int i = 0; i < LOW_RES_POINTS; ++i) {
+            double t = minTime_ + i * step;
+            curve.times.push_back(t);
+            curve.values.push_back(inclusive(node, t));
+        }
+    }
+    return curve;
+}
+
+void TimelineView::checkAsyncResult() {
+    if (currentAsyncState_ && currentAsyncState_->isReady.load(std::memory_order_acquire)) {
+        // 异步任务完成，且未被取消
+        if (!currentAsyncState_->cancelFlag.load(std::memory_order_relaxed)) {
+            curveCache_[currentAsyncState_->targetNode] = std::move(currentAsyncState_->result);
+        }
+        currentAsyncState_.reset();
+    }
+}
+
+void TimelineView::startAsyncBuild(const FlameNode* node) {
+    // 如果当前正在计算同一个节点，无需重复启动
+    if (currentAsyncState_ && currentAsyncState_->targetNode == node) {
+        return;
+    }
+
+    // 如果有正在计算的其他节点，取消它
+    if (currentAsyncState_) {
+        currentAsyncState_->cancelFlag.store(true, std::memory_order_relaxed);
+    }
+
+    // 创建新的异步状态
+    currentAsyncState_ = std::make_shared<AsyncState>();
+    currentAsyncState_->targetNode = node;
+
+    // 启动后台线程
+    std::shared_ptr<AsyncState> state = currentAsyncState_;
+    std::thread([state, node, this]() {
+        CurveData result = this->buildInclusiveCurveAsync(*node, state->cancelFlag);
+        if (!state->cancelFlag.load(std::memory_order_relaxed)) {
+            state->result = std::move(result);
+            state->isReady.store(true, std::memory_order_release);
+        }
+    }).detach();
+}
+
+TimelineView::CurveData TimelineView::getCurveProgressive(const FlameNode* node) {
+    auto it = curveCache_.find(node);
+    if (it != curveCache_.end()) {
+        // 命中高精度缓存，直接返回
+        return it->second;
+    }
+    
+    // 未命中缓存，触发异步高精度计算
+    startAsyncBuild(node);
+    
+    // 实时计算低精度曲线（耗时 < 1ms）作为临时反馈
+    return buildLowResCurve(*node);
+}
+
 // §5.1 — 预计算曲线数据
 void TimelineView::init(const FlameNode& root) {
     rootCurve_ = buildInclusiveCurve(root);
@@ -144,6 +227,9 @@ void TimelineView::init(const FlameNode& root) {
 // §5.1/5.2 — 绘制时间序列曲线 + 游标 + 拖拽选区
 void TimelineView::draw(float availableWidth, float availableHeight, const FlameNode* hoveredNode, const FlameNode* focusNode) {
     if (rootCurve_.times.empty()) return;
+
+    // 检查是否有异步计算完成的高精度曲线
+    checkAsyncResult();
 
     // Escape 或右键 取消选区
     if (rangeSelected_ || dragging_) {
@@ -171,31 +257,25 @@ void TimelineView::draw(float availableWidth, float availableHeight, const Flame
         // §5.1 — 阶梯线绘制
         // 如果有焦点节点（火焰图缩放状态），主曲线切换为焦点节点的 inclusive 曲线，替换掉 root
         if (focusNode != nullptr) {
-            if (focusNode != lastFocusNode_) {
-                focusCurve_ = buildInclusiveCurve(*focusNode);
-                lastFocusNode_ = focusNode;
-            }
+            CurveData focusCurve = getCurveProgressive(focusNode);
             // 焦点节点曲线替换 root 作为主曲线，显式指定蓝色与 hover 橙色区分
             ImPlotSpec focusSpec;
             focusSpec.LineColor = ImVec4(0.4f, 0.7f, 1.0f, 1.0f);
             focusSpec.LineWeight = 1.5f;
-            ImPlot::PlotStairs(focusNode->name->c_str(), focusCurve_.times.data(), focusCurve_.values.data(), (int)focusCurve_.times.size(), focusSpec);
+            ImPlot::PlotStairs(focusNode->name->c_str(), focusCurve.times.data(), focusCurve.values.data(), (int)focusCurve.times.size(), focusSpec);
         } else {
             ImPlot::PlotStairs("root inclusive", rootCurve_.times.data(), rootCurve_.values.data(), (int)rootCurve_.times.size());
         }
 
         // 悬停节点的叠加曲线（颜色较淡，半透明，以示区分）
         if (hoveredNode != nullptr && hoveredNode != focusNode) {
-            if (hoveredNode != lastHoveredNode_) {
-                hoverCurve_ = buildInclusiveCurve(*hoveredNode);
-                lastHoveredNode_ = hoveredNode;
-            }
+            CurveData hoverCurve = getCurveProgressive(hoveredNode);
 
             // 用较淡的橙色绘制悬停节点曲线，与主曲线区分
             ImPlotSpec hoverSpec;
             hoverSpec.LineColor = ImVec4(1.0f, 0.6f, 0.2f, 0.7f);
             hoverSpec.LineWeight = 1.5f;
-            ImPlot::PlotStairs(hoveredNode->name->c_str(), hoverCurve_.times.data(), hoverCurve_.values.data(), (int)hoverCurve_.times.size(), hoverSpec);
+            ImPlot::PlotStairs(hoveredNode->name->c_str(), hoverCurve.times.data(), hoverCurve.values.data(), (int)hoverCurve.times.size(), hoverSpec);
         }
 
         // === 拖拽选区交互（左键拖拽）===
