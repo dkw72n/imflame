@@ -113,6 +113,11 @@ int main(int argc, char* argv[]) {
 
         float canvasWidth = contentSize.x;
 
+        // 填充时序图背景色 (24, 24, 24)
+        ImVec2 timelineCursorPos = ImGui::GetCursorScreenPos();
+        ImDrawList* timelineBgDrawList = ImGui::GetWindowDrawList();
+        timelineBgDrawList->AddRectFilled(timelineCursorPos, ImVec2(timelineCursorPos.x + canvasWidth, timelineCursorPos.y + timelineHeight), IM_COL32(24, 24, 24, 255));
+
         // §5 — 上方：时间序列曲线
         // 传入上一帧悬停的火焰图节点叠加显示其曲线，以及当前缩放聚焦节点切换主曲线
         const FlameNode* focusNode = flameView.getZoomedNode();
@@ -121,6 +126,10 @@ int main(int argc, char* argv[]) {
         // §4/6 — 下方：火焰图
         // 火焰图区域紧贴上方曲线图的下边缘
         ImVec2 flameCursorPos = ImGui::GetCursorScreenPos();
+
+        // 显式填充火焰图背景色 (24, 24, 24)
+        ImDrawList* flameBgDrawList = ImGui::GetWindowDrawList();
+        flameBgDrawList->AddRectFilled(flameCursorPos, ImVec2(flameCursorPos.x + canvasWidth, flameCursorPos.y + flameHeight), IM_COL32(24, 24, 24, 255));
 
         if (timelineView.isRangeSelected()) {
             // Diff 模式：按选区 (t0, t1) 绘制差异火焰图
@@ -146,7 +155,7 @@ int main(int argc, char* argv[]) {
         int displayW, displayH;
         glfwGetFramebufferSize(window, &displayW, &displayH);
         glViewport(0, 0, displayW, displayH);
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClearColor(24.0f / 255.0f, 24.0f / 255.0f, 24.0f / 255.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
