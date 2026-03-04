@@ -64,9 +64,9 @@ void FlameView::drawNode(ImDrawList* drawList, const FlameNode& node, double t,
     ImVec2 p0(x, blockY);
     ImVec2 p1(x + blockWidth, blockY + BLOCK_HEIGHT);
 
-    // §6.1 — 颜色映射
+    // §6.1 — 颜色映射（宽高各减1px，形成边框效果）
     ImU32 color = nameToColor(node.name);
-    drawList->AddRectFilled(p0, p1, color);
+    drawList->AddRectFilled(p0, ImVec2(p1.x - 1.0f, p1.y - 1.0f), color);
 
 #if IMFLAME_ENABLE_SELF_HIGHLIGHT
     // §6.2 — self cost 可视化（右侧高亮段）
@@ -168,7 +168,8 @@ void FlameView::drawNodeDiff(ImDrawList* drawList, const FlameNode& node, double
     ImU32 color = diffColor(nd);
     ImVec2 p0(x, blockY);
     ImVec2 p1(x + blockWidth, blockY + BLOCK_HEIGHT);
-    drawList->AddRectFilled(p0, p1, color);
+    // 宽高各减1px，形成边框效果
+    drawList->AddRectFilled(p0, ImVec2(p1.x - 1.0f, p1.y - 1.0f), color);
 
     // 文字标签
     {
@@ -287,7 +288,8 @@ void FlameView::draw(const FlameNode& root, double t, ImVec2 canvasPos, float ca
                 ImU32 color = nameToColor(ancestor->name);
                 // 半透明处理表示这是上下文
                 ImU32 dimColor = (color & 0x00FFFFFF) | 0xAA000000;
-                drawList->AddRectFilled(p0, p1, dimColor);
+                // 宽高各减1px，形成边框效果
+                drawList->AddRectFilled(p0, ImVec2(p1.x - 1.0f, p1.y - 1.0f), dimColor);
 
                 // 文字标签
                 const char* label = ancestor->name ? ancestor->name->c_str() : "(null)";
@@ -392,7 +394,8 @@ void FlameView::drawDiff(const FlameNode& root, double t0, double t1,
                 ImU32 color = diffColor(nd);
                 // 半透明用于面包屑
                 ImU32 dimColor = (color & 0x00FFFFFF) | 0xAA000000;
-                drawList->AddRectFilled(p0, p1, dimColor);
+                // 宽高各减1px，形成边框效果
+                drawList->AddRectFilled(p0, ImVec2(p1.x - 1.0f, p1.y - 1.0f), dimColor);
 
                 const char* label = ancestor->name ? ancestor->name->c_str() : "(null)";
                 ImVec2 textSize = ImGui::CalcTextSize(label);
