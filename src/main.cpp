@@ -86,6 +86,17 @@ int main(int argc, char* argv[]) {
 
     FlameView flameView;
 
+    // 分隔条位置（时序图占用的比例，0.0 ~ 1.0）
+    float timelineRatio_ = 0.3f;
+    // 分隔条拖拽状态
+    bool draggingDivider_ = false;
+    // 分隔条高度
+    constexpr float DIVIDER_HEIGHT = 6.0f;
+    // 分隔条悬停检测区域扩展（上下各扩展一点方便选中）
+    constexpr float DIVIDER_HIT_EXTEND = 4.0f;
+    // 时序图最大高度
+    constexpr float TIMELINE_MAX_HEIGHT = 350.0f;
+
     // 上一帧火焰图中悬停的节点（用于在时间轴叠加曲线，延迟一帧视觉上无感知）
     const FlameNode* prevHoveredNode = nullptr;
 
@@ -109,23 +120,65 @@ int main(int argc, char* argv[]) {
         ImVec2 contentPos = ImGui::GetCursorScreenPos();
         ImVec2 contentSize = ImGui::GetContentRegionAvail();
 
-        // §4 — 上下区域高度比 3:7，上方最小 150px
+        // §4 — 根据可调整的比例计算高度，上方最小 150px，最大 350px
         float totalHeight = contentSize.y;
-        float timelineHeight = totalHeight * 0.3f;
+        float timelineHeight = totalHeight * timelineRatio_;
         if (timelineHeight < 150.0f) timelineHeight = 150.0f;
-        if (timelineHeight > totalHeight) timelineHeight = totalHeight;
-        float flameHeight = totalHeight - timelineHeight;
+        if (timelineHeight > TIMELINE_MAX_HEIGHT) timelineHeight = TIMELINE_MAX_HEIGHT;
+        if (timelineHeight > totalHeight - 100.0f) timelineHeight = totalHeight - 100.0f;
+        float flameHeight = totalHeight - timelineHeight - DIVIDER_HEIGHT;
 
         float canvasWidth = contentSize.x;
 
+        // 计算分隔条区域（位于时序图和火焰图之间）
+        ImVec2 timelineCursorPos = ImGui::GetCursorScreenPos();
+        float timelineBottom = timelineCursorPos.y + timelineHeight;
+        ImVec2 dividerMin(timelineCursorPos.x, timelineBottom);
+        ImVec2 dividerMax(timelineCursorPos.x + canvasWidth, timelineBottom + DIVIDER_HEIGHT);
+
+        // 处理分隔条拖拽
+        ImVec2 mousePos = ImGui::GetMousePos();
+
+        // 检测鼠标是否在分隔条区域内
+        bool mouseOverDivider = mousePos.x >= dividerMin.x && mousePos.x < dividerMax.x &&
+                                mousePos.y >= dividerMin.y - DIVIDER_HIT_EXTEND && 
+                                mousePos.y < dividerMax.y + DIVIDER_HIT_EXTEND;
+
+        // 更新光标样式
+        if (mouseOverDivider || draggingDivider_) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+        }
+
+        if (draggingDivider_) {
+            // 拖拽中：根据鼠标位置更新比例（限制最大高度 350px）
+            float newTimelineHeight = mousePos.y - contentPos.y;
+            newTimelineHeight = std::max(150.0f, std::min({newTimelineHeight, TIMELINE_MAX_HEIGHT, totalHeight - 100.0f}));
+            timelineRatio_ = newTimelineHeight / totalHeight;
+        } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && mouseOverDivider) {
+            // 左键点击分隔条：开始拖拽
+            draggingDivider_ = true;
+        }
+
+        // 检测鼠标释放：结束拖拽
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            draggingDivider_ = false;
+        }
+
+        // 绘制分隔条（浅灰色）
+        ImDrawList* dividerDrawList = ImGui::GetWindowDrawList();
+        // 悬停或拖拽时稍微变亮
+        ImU32 dividerColor = draggingDivider_ ? IM_COL32(120, 120, 120, 255) : 
+                             (mouseOverDivider ? IM_COL32(100, 100, 100, 255) : 
+                             IM_COL32(80, 80, 80, 255));
+        dividerDrawList->AddRectFilled(dividerMin, dividerMax, dividerColor);
+
         // §5 — 上方：时间序列曲线
         // 传入上一帧悬停的火焰图节点叠加显示其曲线，以及当前缩放聚焦节点切换主曲线
-        ImVec2 timelineCursorPos = ImGui::GetCursorScreenPos();
         const FlameNode* focusNode = flameView.getZoomedNode();
         timelineView.draw(canvasWidth, timelineHeight, prevHoveredNode, focusNode);
 
         // §4/6 — 下方：火焰图
-        // 火焰图区域紧贴上方曲线图的下边缘
+        // 火焰图区域紧贴分隔条的下边缘
         ImVec2 flameCursorPos = ImGui::GetCursorScreenPos();
 
         // 显式填充火焰图背景色 (24, 24, 24)
