@@ -2,6 +2,9 @@
 #include <cmath>
 #include <algorithm>
 
+// §6.2 — Self 高亮功能开关（默认关闭）
+#define IMFLAME_ENABLE_SELF_HIGHLIGHT 0
+
 // §6.1 — 名称哈希 → 颜色映射（高级灰明度）
 ImU32 FlameView::nameToColor(const std::string& name, float brightnessBoost) {
     std::hash<std::string> hasher;
@@ -65,6 +68,7 @@ void FlameView::drawNode(ImDrawList* drawList, const FlameNode& node, double t,
     ImU32 color = nameToColor(node.name);
     drawList->AddRectFilled(p0, p1, color);
 
+#if IMFLAME_ENABLE_SELF_HIGHLIGHT
     // §6.2 — self cost 可视化（右侧高亮段）
     double selfCost = query(node, t);
     if (selfCost > 0.0 && nodeInclusive > 0.0) {
@@ -75,6 +79,9 @@ void FlameView::drawNode(ImDrawList* drawList, const FlameNode& node, double t,
             drawList->AddRectFilled(selfP0, p1, selfColor);
         }
     }
+#else
+    double selfCost = 0.0;  // 未启用 Self 高亮时保持变量可用
+#endif
 
     // 交互处理
     bool hovered = false;
@@ -89,7 +96,9 @@ void FlameView::drawNode(ImDrawList* drawList, const FlameNode& node, double t,
         // §6.3 — Tooltip
         ImGui::BeginTooltip();
         ImGui::Text("Name: %s", node.name ? node.name->c_str() : "(null)");
+#if IMFLAME_ENABLE_SELF_HIGHLIGHT
         ImGui::Text("Self: %.3f", selfCost);
+#endif
         ImGui::Text("Inclusive: %.3f", nodeInclusive);
         if (rootInclusive > 0.0) {
             ImGui::Text("%% of root: %.1f%%", (nodeInclusive / rootInclusive) * 100.0);
