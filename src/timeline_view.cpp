@@ -253,7 +253,7 @@ void TimelineView::draw(float availableWidth, float availableHeight, const Flame
                           ImPlotFlags_NoTitle | ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect)) {
         firstFrame_ = false;
 
-        ImPlot::SetupAxes("Time (s)", "Inclusive Cost", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
+        ImPlot::SetupAxes("Time (s)", "Inclusive Cost", ImPlotAxisFlags_NoHighlight, ImPlotAxisFlags_NoHighlight);
         // Y 轴固定范围 [0, maxValue_]，避免曲线切换时轴范围跳变晃眼
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, maxValue_ * 1.05, ImPlotCond_Always);
         // 限制 X 轴：不允许平移超出数据边界，不允许缩小到超出数据全范围
