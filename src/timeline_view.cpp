@@ -249,6 +249,10 @@ void TimelineView::draw(float availableWidth, float availableHeight, const Flame
     if (firstFrame_) {
         ImPlot::SetNextAxesToFit();
     }
+
+    // 设置图表绘图区域背景颜色为深灰色 (24, 24, 24)
+    ImPlot::PushStyleColor(ImPlotCol_FrameBg, ImVec4(24.0f / 255.0f, 24.0f / 255.0f, 24.0f / 255.0f, 1.0f));
+
     if (ImPlot::BeginPlot("##Timeline", ImVec2(availableWidth, availableHeight),
                           ImPlotFlags_NoTitle | ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect)) {
         firstFrame_ = false;
@@ -362,6 +366,9 @@ void TimelineView::draw(float availableWidth, float availableHeight, const Flame
 
         ImPlot::EndPlot();
     }
+
+    // 恢复之前的样式颜色
+    ImPlot::PopStyleColor();
 
     // 选区模式提示
     if (rangeSelected_) {
