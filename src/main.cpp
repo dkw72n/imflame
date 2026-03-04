@@ -72,6 +72,11 @@ int main(int argc, char* argv[]) {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
 
+    // 设置 ImGui 窗口背景色为 (24, 24, 24)，影响 ImPlot 背景
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.Colors[ImGuiCol_WindowBg] = ImVec4(24.0f / 255.0f, 24.0f / 255.0f, 24.0f / 255.0f, 1.0f);
+    style.Colors[ImGuiCol_ChildBg] = ImVec4(24.0f / 255.0f, 24.0f / 255.0f, 24.0f / 255.0f, 1.0f);
+
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
@@ -113,13 +118,9 @@ int main(int argc, char* argv[]) {
 
         float canvasWidth = contentSize.x;
 
-        // 填充时序图背景色 (24, 24, 24)
-        ImVec2 timelineCursorPos = ImGui::GetCursorScreenPos();
-        ImDrawList* timelineBgDrawList = ImGui::GetWindowDrawList();
-        timelineBgDrawList->AddRectFilled(timelineCursorPos, ImVec2(timelineCursorPos.x + canvasWidth, timelineCursorPos.y + timelineHeight), IM_COL32(24, 24, 24, 255));
-
         // §5 — 上方：时间序列曲线
         // 传入上一帧悬停的火焰图节点叠加显示其曲线，以及当前缩放聚焦节点切换主曲线
+        ImVec2 timelineCursorPos = ImGui::GetCursorScreenPos();
         const FlameNode* focusNode = flameView.getZoomedNode();
         timelineView.draw(canvasWidth, timelineHeight, prevHoveredNode, focusNode);
 
