@@ -141,3 +141,14 @@
 | 6 | 零值处理 | root inclusive = 0 时显示空白，不崩溃 |
 | 7 | 双击放大 | 双击 `child_b` → 放大充满 X 轴 → 显示祖先面包屑 → 双击回退到全局视图 |
 | 8 | Diff 模式 | Shift+拖拽选区 → diff 火焰图显示红/蓝/灰色块 → Tooltip 显示 t0/t1 对比 → Esc 取消 |
+
+---
+
+## 阶段 7：内存深度优化（专项）
+
+| # | 任务 | 说明 | 预期收益 |
+|---|------|------|----------|
+| 7.1 | 消除 `std::vector` 冗余容量 | 在 `data_loader.cpp` 中解析 `samples` 和 `children` 时，提前获取数组大小并 `reserve`，或在加载完成后调用 `shrink_to_fit()`。 | 减少 20%~50% 的常驻内存浪费 |
+| 7.2 | 引入 SAX/流式 JSON 解析 | 替换 `nlohmann::json::parse` (DOM解析)，改用 `nlohmann::json::sax_parse` 在读取词法单元时直接构建 `FlameNode` 树。 | 消除解析期 5~10 倍的峰值内存开销 |
+| 7.3 | 曲线数据降采样 (LOD) | 在 `TimelineView::buildInclusiveCurve` 中，根据屏幕像素宽度对密集时间点进行降采样（如保留区间最大/最小值），限制 `CurveData` 的最大点数。 | 显著降低 `TimelineView` 多份缓存的常驻内存，提升 ImPlot 渲染性能 |
+| 7.4 | 优化 `FlameNode` 结构内存 | 评估 `FlameNode` 的内存占用，在海量节点且样本极少的极端场景下，考虑更紧凑的数据结构或内存池分配。 | 降低海量节点场景下的基础常驻内存 |

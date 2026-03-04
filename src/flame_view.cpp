@@ -1,26 +1,20 @@
 #include "flame_view.h"
-#include <algorithm>
 #include <cmath>
-#include <cstdio>
-#include <functional>
-#include <numeric>
+#include <algorithm>
 
-// §6.1 — 名称哈希 → HSV 颜色映射
-// H = hash(name) % 360, S = 0.6, V = 0.9
-// brightnessBoost: §6.2 self 段亮度 +20% (传入 0.2)
+// §6.1 — 名称哈希 → 颜色映射
 ImU32 FlameView::nameToColor(const std::string& name, float brightnessBoost) {
-    // 简单哈希
     std::hash<std::string> hasher;
-    size_t h = hasher(name);
+    size_t hash = hasher(name);
+    
+    float h = (hash % 360) / 360.0f;
+    float s = 0.6f;
+    float v = 0.9f + brightnessBoost;
+    if (v > 1.0f) v = 1.0f;
 
-    float hue = (float)(h % 360) / 360.0f;
-    float sat = 0.6f;
-    float val = std::min(0.9f + brightnessBoost, 1.0f);
-
-    ImVec4 color;
-    ImGui::ColorConvertHSVtoRGB(hue, sat, val, color.x, color.y, color.z);
-    color.w = 1.0f;
-    return ImGui::ColorConvertFloat4ToU32(color);
+    float r, g, b;
+    ImGui::ColorConvertHSVtoRGB(h, s, v, r, g, b);
+    return ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, 1.0f));
 }
 
 // 在树中查找目标节点，构建路径
@@ -28,14 +22,220 @@ bool FlameView::findNodePath(const FlameNode& node, const FlameNode* target,
                               std::vector<const FlameNode*>& path) {
     path.push_back(&node);
     if (&node == target) return true;
-    for (const auto& child : node.children) {
-        if (findNodePath(child, target, path)) return true;
+
+    for (uint32_t i = 0; i < node.child_count; ++i) {
+        if (findNodePath(node.children[i], target, path)) {
+            return true;
+        }
     }
+
     path.pop_back();
     return false;
 }
 
-// §6 — 绘制火焰图入口
+// 递归绘制节点
+void FlameView::drawNode(ImDrawList* drawList, const FlameNode& node, double t,
+                          double zoomInclusive, double parentInclusive, double rootInclusive,
+                          float x, float y, float totalWidth, int depth) {
+    double nodeInclusive = inclusive(node, t);
+    if (nodeInclusive <= 0.0) return;
+
+    // 色块宽度 = 节点 inclusive / 聚焦节点 inclusive × 画布总宽度
+    float blockWidth = (float)(nodeInclusive / zoomInclusive) * totalWidth;
+
+    // §6.1 — 最小宽度裁剪
+    if (blockWidth < 1.0f) return;
+
+    float blockY = y + depth * BLOCK_HEIGHT;
+
+    // 绘制当前节点
+    ImVec2 p0(x, y);
+    ImVec2 p1(x + blockWidth, y + BLOCK_HEIGHT);
+
+    // §6.1 — 颜色映射
+    ImU32 color = nameToColor(*node.name);
+    drawList->AddRectFilled(p0, p1, color);
+
+    // §6.2 — self cost 可视化（右侧高亮段）
+    double selfCost = query(node, t);
+    if (selfCost > 0.0 && nodeInclusive > 0.0) {
+        float selfWidth = (float)(selfCost / zoomInclusive) * totalWidth;
+        if (selfWidth > 1.0f) {
+            ImVec2 selfP0(p1.x - selfWidth, p0.y);
+            ImU32 selfColor = nameToColor(*node.name, 0.2f); // 亮度 +20%
+            drawList->AddRectFilled(selfP0, p1, selfColor);
+        }
+    }
+
+    // 交互处理
+    bool hovered = false;
+    ImVec2 mousePos = ImGui::GetMousePos();
+    if (mousePos.x >= p0.x && mousePos.x < p1.x && mousePos.y >= p0.y && mousePos.y < p1.y) {
+        hovered = true;
+        hoveredNode_ = &node; // 记录悬停节点供时间轴使用
+
+        // §6.3 — 悬停高亮（白色 2px 边框）
+        drawList->AddRect(p0, p1, IM_COL32(255, 255, 255, 255), 0.0f, 0, 2.0f);
+
+        // §6.3 — Tooltip
+        ImGui::BeginTooltip();
+        ImGui::Text("Name: %s", node.name->c_str());
+        ImGui::Text("Self: %.3f", selfCost);
+        ImGui::Text("Inclusive: %.3f", nodeInclusive);
+        if (rootInclusive > 0.0) {
+            ImGui::Text("%% of root: %.1f%%", (nodeInclusive / rootInclusive) * 100.0);
+        }
+        if (parentInclusive > 0.0) {
+            ImGui::Text("%% of parent: %.1f%%", (nodeInclusive / parentInclusive) * 100.0);
+        }
+        ImGui::EndTooltip();
+
+        // §6.3 — 双击放大（延迟处理）
+        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            doubleClickedNode_ = &node;
+        }
+    }
+
+    // 绘制文本（如果宽度足够）
+    if (blockWidth > 30.0f) {
+        ImVec2 textSize = ImGui::CalcTextSize(node.name->c_str());
+        if (textSize.x < blockWidth - 4.0f) {
+            drawList->AddText(ImVec2(p0.x + 2.0f, p0.y + (BLOCK_HEIGHT - textSize.y) * 0.5f),
+                              IM_COL32(0, 0, 0, 255), node.name->c_str());
+        }
+    }
+
+    // 递归绘制子节点
+    float childX = x;
+    float childY = y + BLOCK_HEIGHT;
+    for (uint32_t i = 0; i < node.child_count; ++i) {
+        drawNode(drawList, node.children[i], t, zoomInclusive, nodeInclusive, rootInclusive,
+                 childX, childY, totalWidth, depth + 1);
+        
+        double childIncl = inclusive(node.children[i], t);
+        float childWidth = (float)(childIncl / zoomInclusive) * totalWidth;
+        childX += childWidth;
+    }
+}
+
+// 递归查找整棵树中 |inclusive(t1) - inclusive(t0)| 的最大值
+double FlameView::findMaxAbsDelta(const FlameNode& node, double t0, double t1) {
+    double delta = inclusive(node, t1) - inclusive(node, t0);
+    double maxAbs = std::abs(delta);
+    for (uint32_t i = 0; i < node.child_count; ++i) {
+        double childMax = findMaxAbsDelta(node.children[i], t0, t1);
+        if (childMax > maxAbs) maxAbs = childMax;
+    }
+    return maxAbs;
+}
+
+// 递归绘制节点（Diff 模式）
+void FlameView::drawNodeDiff(ImDrawList* drawList, const FlameNode& node, double t0, double t1,
+                              double zoomInclusive, double parentInclusive, double rootInclusive,
+                              double maxAbsDelta,
+                              float x, float y, float totalWidth, int depth) {
+    // 尺寸按 t1
+    double nodeIncl1 = inclusive(node, t1);
+    if (nodeIncl1 <= 0.0) return;
+
+    float blockWidth = (float)(nodeIncl1 / zoomInclusive) * totalWidth;
+    if (blockWidth < 1.0f) return;
+
+    float blockY = y + depth * BLOCK_HEIGHT;
+
+    // 颜色按 diff
+    double nodeIncl0 = inclusive(node, t0);
+    double delta = nodeIncl1 - nodeIncl0;
+    double nd = delta / maxAbsDelta;
+
+    ImU32 color = diffColor(nd);
+    ImVec2 p0(x, blockY);
+    ImVec2 p1(x + blockWidth, blockY + BLOCK_HEIGHT);
+    drawList->AddRectFilled(p0, p1, color);
+
+    // 文字标签
+    {
+        const char* label = node.name->c_str();
+        ImVec2 textSize = ImGui::CalcTextSize(label);
+        if (textSize.x + 4.0f < blockWidth) {
+            float textX = x + 2.0f;
+            float textY = blockY + (BLOCK_HEIGHT - textSize.y) * 0.5f;
+            drawList->AddText(ImVec2(textX, textY), IM_COL32(255, 255, 255, 255), label);
+        }
+    }
+
+    // 悬停交互 — Diff Tooltip
+    ImVec2 mousePos = ImGui::GetMousePos();
+    if (mousePos.x >= p0.x && mousePos.x < p1.x &&
+        mousePos.y >= p0.y && mousePos.y < p1.y) {
+        drawList->AddRect(p0, p1, IM_COL32(255, 255, 255, 255), 0.0f, 0, 2.0f);
+
+        double selfVal0 = query(node, t0);
+        double selfVal1 = query(node, t1);
+
+        ImGui::BeginTooltip();
+        ImGui::Text("Name:       %s", node.name->c_str());
+        ImGui::Separator();
+        ImGui::Text("Self(t0):   %.2f  -> Self(t1):   %.2f  [%+.2f]", selfVal0, selfVal1, selfVal1 - selfVal0);
+        ImGui::Text("Incl(t0):   %.2f  -> Incl(t1):   %.2f  [%+.2f]", nodeIncl0, nodeIncl1, delta);
+        if (nodeIncl0 > 0.0) {
+            ImGui::Text("Change:     %+.1f%%", (delta / nodeIncl0) * 100.0);
+        } else if (delta > 0.0) {
+            ImGui::Text("Change:     +inf%% (new)");
+        }
+        ImGui::Text("%% of root(t1): %.1f%%", (nodeIncl1 / rootInclusive) * 100.0);
+        ImGui::EndTooltip();
+
+        // 记录悬停节点
+        hoveredNode_ = &node;
+
+        if (ImGui::IsMouseDoubleClicked(0)) {
+            doubleClickedNode_ = &node;
+        }
+    }
+
+    // 子节点递归（尺寸按 t1）
+    float childX = x;
+    for (uint32_t i = 0; i < node.child_count; ++i) {
+        const auto& child = node.children[i];
+        double childIncl1 = inclusive(child, t1);
+        if (childIncl1 <= 0.0) continue;
+
+        float childWidth = (float)(childIncl1 / zoomInclusive) * totalWidth;
+        if (childWidth < 1.0f) continue;
+
+        drawNodeDiff(drawList, child, t0, t1, zoomInclusive, nodeIncl1, rootInclusive,
+                     maxAbsDelta, childX, y, totalWidth, depth + 1);
+        childX += childWidth;
+    }
+}
+
+// Diff 颜色映射
+ImU32 FlameView::diffColor(double normalizedDelta) {
+    // clamp to [-1, 1]
+    float nd = (float)std::max(-1.0, std::min(1.0, normalizedDelta));
+
+    float r, g, b;
+    if (nd > 0.0f) {
+        // 灰色 → 红色 (interpolate)
+        float t = nd;
+        r = 128.0f + t * (255.0f - 128.0f);
+        g = 128.0f + t * (50.0f - 128.0f);
+        b = 128.0f + t * (50.0f - 128.0f);
+    } else if (nd < 0.0f) {
+        // 灰色 → 蓝色 (interpolate)
+        float t = -nd;
+        r = 128.0f + t * (50.0f - 128.0f);
+        g = 128.0f + t * (100.0f - 128.0f);
+        b = 128.0f + t * (255.0f - 128.0f);
+    } else {
+        r = 128.0f; g = 128.0f; b = 128.0f;
+    }
+
+    return IM_COL32((int)r, (int)g, (int)b, 255);
+}
+
+// 绘制火焰图
 void FlameView::draw(const FlameNode& root, double t, ImVec2 canvasPos, float canvasWidth) {
     double rootIncl = inclusive(root, t);
 
@@ -67,13 +267,13 @@ void FlameView::draw(const FlameNode& root, double t, ImVec2 canvasPos, float ca
                 ImVec2 p1(canvasPos.x + canvasWidth, blockY + BLOCK_HEIGHT);
 
                 // 用较暗的颜色绘制祖先
-                ImU32 color = nameToColor(ancestor->name);
+                ImU32 color = nameToColor(*ancestor->name);
                 // 半透明处理表示这是上下文
                 ImU32 dimColor = (color & 0x00FFFFFF) | 0xAA000000;
                 drawList->AddRectFilled(p0, p1, dimColor);
 
                 // 文字标签
-                const char* label = ancestor->name.c_str();
+                const char* label = ancestor->name->c_str();
                 ImVec2 textSize = ImGui::CalcTextSize(label);
                 if (textSize.x + 4.0f < canvasWidth) {
                     float textX = canvasPos.x + 2.0f;
@@ -88,7 +288,7 @@ void FlameView::draw(const FlameNode& root, double t, ImVec2 canvasPos, float ca
                     drawList->AddRect(p0, p1, IM_COL32(255, 255, 255, 255), 0.0f, 0, 2.0f);
 
                     ImGui::BeginTooltip();
-                    ImGui::Text("Name:       %s", ancestor->name.c_str());
+                    ImGui::Text("Name:       %s", ancestor->name->c_str());
                     ImGui::Text("Self cost:  %.2f", ancestorSelf);
                     ImGui::Text("Inclusive:   %.2f", ancestorIncl);
                     ImGui::Text("%% of root:  %.1f%%", (ancestorIncl / rootIncl) * 100.0);
@@ -135,147 +335,8 @@ void FlameView::draw(const FlameNode& root, double t, ImVec2 canvasPos, float ca
     }
 }
 
-// 递归绘制节点
-void FlameView::drawNode(ImDrawList* drawList, const FlameNode& node, double t,
-                          double zoomInclusive, double parentInclusive, double rootInclusive,
-                          float x, float y, float totalWidth, int depth) {
-    double nodeInclusive = inclusive(node, t);
-    if (nodeInclusive <= 0.0) return;
-
-    // 色块宽度 = 节点 inclusive / 聚焦节点 inclusive × 画布总宽度
-    float blockWidth = (float)(nodeInclusive / zoomInclusive) * totalWidth;
-
-    // §6.1 — 最小宽度裁剪
-    if (blockWidth < 1.0f) return;
-
-    float blockY = y + depth * BLOCK_HEIGHT;
-
-    // §6.1 — 绘制色块
-    ImU32 color = nameToColor(node.name);
-    ImVec2 p0(x, blockY);
-    ImVec2 p1(x + blockWidth, blockY + BLOCK_HEIGHT);
-    drawList->AddRectFilled(p0, p1, color);
-
-    // §6.2 — self cost 可视化
-    double selfCost = query(node, t);
-    if (selfCost > 0.0 && nodeInclusive > 0.0) {
-        float selfWidth = (float)(selfCost / nodeInclusive) * blockWidth;
-        if (selfWidth >= 1.0f) {
-            ImU32 selfColor = nameToColor(node.name, 0.2f);
-            ImVec2 selfP0(x + blockWidth - selfWidth, blockY);
-            ImVec2 selfP1(x + blockWidth, blockY + BLOCK_HEIGHT);
-            drawList->AddRectFilled(selfP0, selfP1, selfColor);
-        }
-    }
-
-    // 绘制文字标签（如果色块足够宽）
-    {
-        const char* label = node.name.c_str();
-        ImVec2 textSize = ImGui::CalcTextSize(label);
-        if (textSize.x + 4.0f < blockWidth) {
-            float textX = x + 2.0f;
-            float textY = blockY + (BLOCK_HEIGHT - textSize.y) * 0.5f;
-            drawList->AddText(ImVec2(textX, textY), IM_COL32(255, 255, 255, 255), label);
-        }
-    }
-
-    // §6.3 — 悬停交互
-    ImVec2 mousePos = ImGui::GetMousePos();
-    if (mousePos.x >= p0.x && mousePos.x < p1.x &&
-        mousePos.y >= p0.y && mousePos.y < p1.y) {
-        // 高亮：白色 2px 边框
-        drawList->AddRect(p0, p1, IM_COL32(255, 255, 255, 255), 0.0f, 0, 2.0f);
-
-        // Tooltip
-        ImGui::BeginTooltip();
-        ImGui::Text("Name:       %s", node.name.c_str());
-        ImGui::Text("Self cost:  %.2f", selfCost);
-        ImGui::Text("Inclusive:   %.2f", nodeInclusive);
-        ImGui::Text("%% of root:  %.1f%%", (nodeInclusive / rootInclusive) * 100.0);
-        if (parentInclusive > 0.0) {
-            ImGui::Text("%% of parent: %.1f%%", (nodeInclusive / parentInclusive) * 100.0);
-        }
-        ImGui::EndTooltip();
-
-        // 记录悬停节点
-        hoveredNode_ = &node;
-
-        // 双击 → 记录被双击的节点
-        if (ImGui::IsMouseDoubleClicked(0)) {
-            doubleClickedNode_ = &node;
-        }
-    }
-
-    // §6.1 — 子节点按名称字母序排列，从父节点左边界开始向右排列
-    std::vector<const FlameNode*> sortedChildren;
-    for (const auto& child : node.children) {
-        sortedChildren.push_back(&child);
-    }
-    std::sort(sortedChildren.begin(), sortedChildren.end(),
-        [](const FlameNode* a, const FlameNode* b) {
-            return a->name < b->name;
-        });
-
-    float childX = x;
-    for (const FlameNode* child : sortedChildren) {
-        double childIncl = inclusive(*child, t);
-        if (childIncl <= 0.0) continue;
-
-        float childWidth = (float)(childIncl / zoomInclusive) * totalWidth;
-        if (childWidth < 1.0f) continue;
-
-        drawNode(drawList, *child, t, zoomInclusive, nodeInclusive, rootInclusive,
-                 childX, y, totalWidth, depth + 1);
-        childX += childWidth;
-    }
-}
-
-// === Diff 模式相关实现 ===
-
-// Diff 颜色映射
-// normalizedDelta 范围 [-1, 1]:
-//   +1 → 纯红 (255, 50, 50)
-//   -1 → 纯蓝 (50, 100, 255)
-//    0 → 灰色 (128, 128, 128)
-ImU32 FlameView::diffColor(double normalizedDelta) {
-    // clamp to [-1, 1]
-    float nd = (float)std::max(-1.0, std::min(1.0, normalizedDelta));
-
-    float r, g, b;
-    if (nd > 0.0f) {
-        // 灰色 → 红色 (interpolate)
-        float t = nd;
-        r = 128.0f + t * (255.0f - 128.0f);
-        g = 128.0f + t * (50.0f - 128.0f);
-        b = 128.0f + t * (50.0f - 128.0f);
-    } else if (nd < 0.0f) {
-        // 灰色 → 蓝色 (interpolate)
-        float t = -nd;
-        r = 128.0f + t * (50.0f - 128.0f);
-        g = 128.0f + t * (100.0f - 128.0f);
-        b = 128.0f + t * (255.0f - 128.0f);
-    } else {
-        r = 128.0f; g = 128.0f; b = 128.0f;
-    }
-
-    return IM_COL32((int)r, (int)g, (int)b, 255);
-}
-
-// 递归查找整棵树中 |inclusive(t1) - inclusive(t0)| 的最大值
-double FlameView::findMaxAbsDelta(const FlameNode& node, double t0, double t1) {
-    double incl0 = inclusive(node, t0);
-    double incl1 = inclusive(node, t1);
-    double maxAbs = std::abs(incl1 - incl0);
-
-    for (const auto& child : node.children) {
-        double childMax = findMaxAbsDelta(child, t0, t1);
-        if (childMax > maxAbs) maxAbs = childMax;
-    }
-    return maxAbs;
-}
-
-// Diff 模式入口
-void FlameView::drawDiff(const FlameNode& root, double t0, double t1,
+// 绘制Diff模式的火焰图
+void FlameView::drawDiff(const FlameNode& root, double t0, double t1, 
                           ImVec2 canvasPos, float canvasWidth) {
     // 节点尺寸按 t1 绘制
     double rootInclT1 = inclusive(root, t1);
@@ -316,7 +377,7 @@ void FlameView::drawDiff(const FlameNode& root, double t0, double t1,
                 ImU32 dimColor = (color & 0x00FFFFFF) | 0xAA000000;
                 drawList->AddRectFilled(p0, p1, dimColor);
 
-                const char* label = ancestor->name.c_str();
+                const char* label = ancestor->name->c_str();
                 ImVec2 textSize = ImGui::CalcTextSize(label);
                 if (textSize.x + 4.0f < canvasWidth) {
                     float textX = canvasPos.x + 2.0f;
@@ -330,7 +391,7 @@ void FlameView::drawDiff(const FlameNode& root, double t0, double t1,
                     drawList->AddRect(p0, p1, IM_COL32(255, 255, 255, 255), 0.0f, 0, 2.0f);
 
                     ImGui::BeginTooltip();
-                    ImGui::Text("Name:      %s", ancestor->name.c_str());
+                    ImGui::Text("Name:      %s", ancestor->name->c_str());
                     ImGui::Text("Incl(t0):  %.2f", ancestorIncl0);
                     ImGui::Text("Incl(t1):  %.2f", ancestorIncl1);
                     ImGui::Text("Delta:     %+.2f", delta);
@@ -370,94 +431,5 @@ void FlameView::drawDiff(const FlameNode& root, double t0, double t1,
             findNodePath(root, zoomedNode_, zoomPath_);
         }
         doubleClickedNode_ = nullptr;
-    }
-}
-
-// Diff 模式递归绘制
-void FlameView::drawNodeDiff(ImDrawList* drawList, const FlameNode& node, double t0, double t1,
-                              double zoomInclusive, double parentInclusive, double rootInclusive,
-                              double maxAbsDelta,
-                              float x, float y, float totalWidth, int depth) {
-    // 尺寸按 t1
-    double nodeIncl1 = inclusive(node, t1);
-    if (nodeIncl1 <= 0.0) return;
-
-    float blockWidth = (float)(nodeIncl1 / zoomInclusive) * totalWidth;
-    if (blockWidth < 1.0f) return;
-
-    float blockY = y + depth * BLOCK_HEIGHT;
-
-    // 颜色按 diff
-    double nodeIncl0 = inclusive(node, t0);
-    double delta = nodeIncl1 - nodeIncl0;
-    double nd = delta / maxAbsDelta;
-
-    ImU32 color = diffColor(nd);
-    ImVec2 p0(x, blockY);
-    ImVec2 p1(x + blockWidth, blockY + BLOCK_HEIGHT);
-    drawList->AddRectFilled(p0, p1, color);
-
-    // 文字标签
-    {
-        const char* label = node.name.c_str();
-        ImVec2 textSize = ImGui::CalcTextSize(label);
-        if (textSize.x + 4.0f < blockWidth) {
-            float textX = x + 2.0f;
-            float textY = blockY + (BLOCK_HEIGHT - textSize.y) * 0.5f;
-            drawList->AddText(ImVec2(textX, textY), IM_COL32(255, 255, 255, 255), label);
-        }
-    }
-
-    // 悬停交互 — Diff Tooltip
-    ImVec2 mousePos = ImGui::GetMousePos();
-    if (mousePos.x >= p0.x && mousePos.x < p1.x &&
-        mousePos.y >= p0.y && mousePos.y < p1.y) {
-        drawList->AddRect(p0, p1, IM_COL32(255, 255, 255, 255), 0.0f, 0, 2.0f);
-
-        double selfVal0 = query(node, t0);
-        double selfVal1 = query(node, t1);
-
-        ImGui::BeginTooltip();
-        ImGui::Text("Name:       %s", node.name.c_str());
-        ImGui::Separator();
-        ImGui::Text("Self(t0):   %.2f  -> Self(t1):   %.2f  [%+.2f]", selfVal0, selfVal1, selfVal1 - selfVal0);
-        ImGui::Text("Incl(t0):   %.2f  -> Incl(t1):   %.2f  [%+.2f]", nodeIncl0, nodeIncl1, delta);
-        if (nodeIncl0 > 0.0) {
-            ImGui::Text("Change:     %+.1f%%", (delta / nodeIncl0) * 100.0);
-        } else if (delta > 0.0) {
-            ImGui::Text("Change:     +inf%% (new)");
-        }
-        ImGui::Text("%% of root(t1): %.1f%%", (nodeIncl1 / rootInclusive) * 100.0);
-        ImGui::EndTooltip();
-
-        // 记录悬停节点
-        hoveredNode_ = &node;
-
-        if (ImGui::IsMouseDoubleClicked(0)) {
-            doubleClickedNode_ = &node;
-        }
-    }
-
-    // 子节点递归（尺寸按 t1）
-    std::vector<const FlameNode*> sortedChildren;
-    for (const auto& child : node.children) {
-        sortedChildren.push_back(&child);
-    }
-    std::sort(sortedChildren.begin(), sortedChildren.end(),
-        [](const FlameNode* a, const FlameNode* b) {
-            return a->name < b->name;
-        });
-
-    float childX = x;
-    for (const FlameNode* child : sortedChildren) {
-        double childIncl1 = inclusive(*child, t1);
-        if (childIncl1 <= 0.0) continue;
-
-        float childWidth = (float)(childIncl1 / zoomInclusive) * totalWidth;
-        if (childWidth < 1.0f) continue;
-
-        drawNodeDiff(drawList, *child, t0, t1, zoomInclusive, nodeIncl1, rootInclusive,
-                     maxAbsDelta, childX, y, totalWidth, depth + 1);
-        childX += childWidth;
     }
 }

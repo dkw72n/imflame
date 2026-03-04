@@ -4,31 +4,146 @@
 #include <cstdio>
 #include <algorithm>
 #include <cmath>
+#include <queue>
+
+TimelineView::CurveData TimelineView::buildInclusiveCurve(const FlameNode& node) {
+    std::vector<const FlameNode*> nodes;
+    auto collect = [&](auto& self, const FlameNode& n) -> void {
+        nodes.push_back(&n);
+        for (uint32_t i = 0; i < n.child_count; ++i) {
+            self(self, n.children[i]);
+        }
+    };
+    collect(collect, node);
+
+    struct IteratorState {
+        const Sample* current;
+        const Sample* end;
+        int node_idx;
+
+        bool operator>(const IteratorState& other) const {
+            return current->time > other.current->time;
+        }
+    };
+
+    std::priority_queue<IteratorState, std::vector<IteratorState>, std::greater<IteratorState>> pq;
+
+    size_t total_samples = 0;
+    for (int i = 0; i < nodes.size(); ++i) {
+        total_samples += nodes[i]->sample_count;
+        if (nodes[i]->sample_count > 0) {
+            pq.push({nodes[i]->samples.get(), nodes[i]->samples.get() + nodes[i]->sample_count, i});
+        }
+    }
+
+    CurveData curve;
+    curve.times.reserve(total_samples);
+    curve.values.reserve(total_samples);
+
+    std::vector<double> current_vals(nodes.size(), 0.0);
+    double current_sum = 0.0;
+
+    while (!pq.empty()) {
+        double t = pq.top().current->time;
+        
+        // Process all events at time t
+        while (!pq.empty() && pq.top().current->time == t) {
+            auto state = pq.top();
+            pq.pop();
+
+            int idx = state.node_idx;
+            double val = state.current->value;
+            current_sum += (val - current_vals[idx]);
+            current_vals[idx] = val;
+
+            state.current++;
+            if (state.current != state.end) {
+                pq.push(state);
+            }
+        }
+
+        curve.times.push_back(t);
+        curve.values.push_back(current_sum);
+    }
+
+    // §7.3 — 曲线数据降采样 (LOD)
+    constexpr size_t MAX_POINTS = 4000;
+    if (curve.times.size() > MAX_POINTS) {
+        CurveData downsampled;
+        downsampled.times.reserve(MAX_POINTS);
+        downsampled.values.reserve(MAX_POINTS);
+
+        size_t n = curve.times.size();
+        double min_t = curve.times.front();
+        double max_t = curve.times.back();
+        
+        size_t num_buckets = MAX_POINTS / 2;
+        double bucket_duration = (max_t - min_t) / num_buckets;
+        if (bucket_duration <= 0) bucket_duration = 1.0;
+
+        double current_val = 0.0;
+        size_t idx = 0;
+        
+        for (size_t b = 0; b < num_buckets; ++b) {
+            double b_start = min_t + b * bucket_duration;
+            double b_end = b_start + bucket_duration;
+
+            double b_min = current_val;
+            double b_max = current_val;
+
+            while (idx < n && curve.times[idx] < b_end) {
+                current_val = curve.values[idx];
+                b_min = std::min(b_min, current_val);
+                b_max = std::max(b_max, current_val);
+                idx++;
+            }
+
+            downsampled.times.push_back(b_start);
+            downsampled.values.push_back(b_min);
+            if (b_max > b_min) {
+                downsampled.times.push_back(b_start + bucket_duration * 0.5);
+                downsampled.values.push_back(b_max);
+            }
+        }
+        
+        // 确保最后一个点被添加
+        if (idx < n) {
+            downsampled.times.push_back(curve.times.back());
+            downsampled.values.push_back(curve.values.back());
+        } else if (!downsampled.times.empty() && downsampled.times.back() < max_t) {
+            downsampled.times.push_back(max_t);
+            downsampled.values.push_back(current_val);
+        }
+
+        curve = std::move(downsampled);
+    }
+
+    curve.times.shrink_to_fit();
+    curve.values.shrink_to_fit();
+
+    return curve;
+}
 
 // §5.1 — 预计算曲线数据
 void TimelineView::init(const FlameNode& root) {
-    times_ = collectAllTimes(root);
-    values_.resize(times_.size());
-    for (size_t i = 0; i < times_.size(); ++i) {
-        values_[i] = inclusive(root, times_[i]);
-    }
+    rootCurve_ = buildInclusiveCurve(root);
 
-    if (!times_.empty()) {
-        minTime_ = times_.front();
-        maxTime_ = times_.back();
+    if (!rootCurve_.times.empty()) {
+        minTime_ = rootCurve_.times.front();
+        maxTime_ = rootCurve_.times.back();
         cursorTime_ = minTime_;  // §5.2 初始位置 = 最小时间
 
         // 预计算 Y 轴最大值，用于固定 Y 轴范围，避免曲线切换时轴范围跳变
         maxValue_ = 0.0;
-        for (size_t i = 0; i < values_.size(); ++i) {
-            if (values_[i] > maxValue_) maxValue_ = values_[i];
+        for (size_t i = 0; i < rootCurve_.values.size(); ++i) {
+            if (rootCurve_.values[i] > maxValue_) maxValue_ = rootCurve_.values[i];
         }
     }
 }
 
 // §5.1/5.2 — 绘制时间序列曲线 + 游标 + 拖拽选区
 void TimelineView::draw(float availableWidth, float availableHeight, const FlameNode* hoveredNode, const FlameNode* focusNode) {
-    if (times_.empty()) return;
+    if (rootCurve_.times.empty()) return;
 
     // Escape 或右键 取消选区
     if (rangeSelected_ || dragging_) {
@@ -56,31 +171,31 @@ void TimelineView::draw(float availableWidth, float availableHeight, const Flame
         // §5.1 — 阶梯线绘制
         // 如果有焦点节点（火焰图缩放状态），主曲线切换为焦点节点的 inclusive 曲线，替换掉 root
         if (focusNode != nullptr) {
-            focusValues_.resize(times_.size());
-            for (size_t i = 0; i < times_.size(); ++i) {
-                focusValues_[i] = inclusive(*focusNode, times_[i]);
+            if (focusNode != lastFocusNode_) {
+                focusCurve_ = buildInclusiveCurve(*focusNode);
+                lastFocusNode_ = focusNode;
             }
             // 焦点节点曲线替换 root 作为主曲线，显式指定蓝色与 hover 橙色区分
             ImPlotSpec focusSpec;
             focusSpec.LineColor = ImVec4(0.4f, 0.7f, 1.0f, 1.0f);
             focusSpec.LineWeight = 1.5f;
-            ImPlot::PlotStairs(focusNode->name.c_str(), times_.data(), focusValues_.data(), (int)times_.size(), focusSpec);
+            ImPlot::PlotStairs(focusNode->name->c_str(), focusCurve_.times.data(), focusCurve_.values.data(), (int)focusCurve_.times.size(), focusSpec);
         } else {
-            ImPlot::PlotStairs("root inclusive", times_.data(), values_.data(), (int)times_.size());
+            ImPlot::PlotStairs("root inclusive", rootCurve_.times.data(), rootCurve_.values.data(), (int)rootCurve_.times.size());
         }
 
         // 悬停节点的叠加曲线（颜色较淡，半透明，以示区分）
         if (hoveredNode != nullptr && hoveredNode != focusNode) {
-            hoverValues_.resize(times_.size());
-            for (size_t i = 0; i < times_.size(); ++i) {
-                hoverValues_[i] = inclusive(*hoveredNode, times_[i]);
+            if (hoveredNode != lastHoveredNode_) {
+                hoverCurve_ = buildInclusiveCurve(*hoveredNode);
+                lastHoveredNode_ = hoveredNode;
             }
 
             // 用较淡的橙色绘制悬停节点曲线，与主曲线区分
             ImPlotSpec hoverSpec;
             hoverSpec.LineColor = ImVec4(1.0f, 0.6f, 0.2f, 0.7f);
             hoverSpec.LineWeight = 1.5f;
-            ImPlot::PlotStairs(hoveredNode->name.c_str(), times_.data(), hoverValues_.data(), (int)times_.size(), hoverSpec);
+            ImPlot::PlotStairs(hoveredNode->name->c_str(), hoverCurve_.times.data(), hoverCurve_.values.data(), (int)hoverCurve_.times.size(), hoverSpec);
         }
 
         // === 拖拽选区交互（左键拖拽）===

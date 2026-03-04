@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <memory>
 
 // §2.1 — 采样点
 struct Sample {
@@ -10,11 +11,13 @@ struct Sample {
     double value;  // self cost
 };
 
-// §2.1 — 火焰图节点
+// §2.1 — 火焰图节点 (优化内存布局)
 struct FlameNode {
-    std::string name;
-    std::vector<Sample> samples; // 按 time 升序排列
-    std::vector<FlameNode> children;
+    const std::string* name = nullptr; // 使用字符串池，避免重复分配
+    uint32_t sample_count = 0;
+    uint32_t child_count = 0;
+    std::unique_ptr<Sample[]> samples;
+    std::unique_ptr<FlameNode[]> children;
 };
 
 // §2.3 — 前值保持查询：在 node.samples 中找最后一个 time ≤ t 的值

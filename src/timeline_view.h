@@ -29,8 +29,14 @@ public:
     double getRangeT1() const { return rangeT1_; }
 
 private:
-    std::vector<double> times_;   // 全局时间点
-    std::vector<double> values_;  // 对应 inclusive(root, t)
+    struct CurveData {
+        std::vector<double> times;
+        std::vector<double> values;
+    };
+
+    CurveData buildInclusiveCurve(const FlameNode& node);
+
+    CurveData rootCurve_;
     double cursorTime_ = 0.0;
     double minTime_ = 0.0;
     double maxTime_ = 0.0;
@@ -45,9 +51,11 @@ private:
     double rangeT1_ = 0.0;       // 选区结束（较大值）
     bool firstFrame_ = true;     // 首帧标记，用于仅首次自适应轴范围
 
-    // 悬停节点曲线数据缓冲区（每帧按需填充，避免重复分配）
-    std::vector<double> hoverValues_;
+    // 悬停节点曲线数据缓存
+    const FlameNode* lastHoveredNode_ = nullptr;
+    CurveData hoverCurve_;
     
-    // 焦点节点曲线数据缓冲区（每帧按需填充）
-    std::vector<double> focusValues_;
+    // 焦点节点曲线数据缓存
+    const FlameNode* lastFocusNode_ = nullptr;
+    CurveData focusCurve_;
 };

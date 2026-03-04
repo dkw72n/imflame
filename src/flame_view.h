@@ -2,6 +2,7 @@
 
 #include "flame_data.h"
 #include "imgui.h"
+#include <string>
 #include <vector>
 
 // §6 — 火焰图视图
