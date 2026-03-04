@@ -2,15 +2,15 @@
 #include <cmath>
 #include <algorithm>
 
-// §6.1 — 名称哈希 → 颜色映射
+// §6.1 — 名称哈希 → 颜色映射（高级灰明度）
 ImU32 FlameView::nameToColor(const std::string& name, float brightnessBoost) {
     std::hash<std::string> hasher;
     size_t hash = hasher(name);
     
     float h = (hash % 360) / 360.0f;
-    float s = 0.6f;
-    float v = 0.9f + brightnessBoost;
-    if (v > 1.0f) v = 1.0f;
+    float s = 0.6f;  // 保持饱和度
+    float v = 0.72f + brightnessBoost;  // 高级灰明度（约 0.72）
+    if (v > 0.92f) v = 0.92f;  // 限制最大明度
 
     float r, g, b;
     ImGui::ColorConvertHSVtoRGB(h, s, v, r, g, b);
