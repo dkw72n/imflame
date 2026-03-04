@@ -58,8 +58,8 @@ void FlameView::drawNode(ImDrawList* drawList, const FlameNode& node, double t,
     float blockY = y + depth * BLOCK_HEIGHT;
 
     // 绘制当前节点
-    ImVec2 p0(x, y);
-    ImVec2 p1(x + blockWidth, y + BLOCK_HEIGHT);
+    ImVec2 p0(x, blockY);
+    ImVec2 p1(x + blockWidth, blockY + BLOCK_HEIGHT);
 
     // §6.1 — 颜色映射
     ImU32 color = nameToColor(node.name);
@@ -116,10 +116,9 @@ void FlameView::drawNode(ImDrawList* drawList, const FlameNode& node, double t,
 
     // 递归绘制子节点
     float childX = x;
-    float childY = y + BLOCK_HEIGHT;
     for (uint32_t i = 0; i < node.child_count; ++i) {
         drawNode(drawList, node.children[i], t, zoomInclusive, nodeInclusive, rootInclusive,
-                 childX, childY, totalWidth, depth + 1);
+                 childX, y, totalWidth, depth + 1);
         
         double childIncl = inclusive(node.children[i], t);
         float childWidth = (float)(childIncl / zoomInclusive) * totalWidth;
