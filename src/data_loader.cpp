@@ -24,6 +24,13 @@ private:
     std::unordered_set<std::string> pool_;
 };
 
+// 全局字符串池，生命周期覆盖整个程序运行期间
+// FlameNode::name 指针指向此池中的字符串，必须保证池不被提前析构
+static StringPool& getGlobalStringPool() {
+    static StringPool pool;
+    return pool;
+}
+
 class FlameNodeSax : public nlohmann::json_sax<json> {
 public:
     struct TempNode {
@@ -34,7 +41,7 @@ public:
 
     TempNode result;
     std::vector<TempNode> nodeStack;
-    StringPool stringPool;
+    StringPool& stringPool = getGlobalStringPool();
     
     enum class State {
         None,

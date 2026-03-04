@@ -27,6 +27,9 @@ private:
 
     // §6.1 — 名称哈希 → 颜色映射
     static ImU32 nameToColor(const std::string& name, float brightnessBoost = 0.0f);
+    
+    // 重载版本：安全处理空指针
+    static ImU32 nameToColor(const std::string* name, float brightnessBoost = 0.0f);
 
     // Diff 颜色映射: delta > 0 红色, delta < 0 蓝色, delta == 0 灰色
     // normalizedDelta: delta / maxAbsDelta，范围 [-1, 1]

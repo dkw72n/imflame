@@ -17,6 +17,15 @@ ImU32 FlameView::nameToColor(const std::string& name, float brightnessBoost) {
     return ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, 1.0f));
 }
 
+// 重载版本：安全处理空指针
+ImU32 FlameView::nameToColor(const std::string* name, float brightnessBoost) {
+    if (!name) {
+        // 空名称返回灰色
+        return IM_COL32(128, 128, 128, 255);
+    }
+    return nameToColor(*name, brightnessBoost);
+}
+
 // 在树中查找目标节点，构建路径
 bool FlameView::findNodePath(const FlameNode& node, const FlameNode* target,
                               std::vector<const FlameNode*>& path) {
@@ -53,7 +62,7 @@ void FlameView::drawNode(ImDrawList* drawList, const FlameNode& node, double t,
     ImVec2 p1(x + blockWidth, y + BLOCK_HEIGHT);
 
     // §6.1 — 颜色映射
-    ImU32 color = nameToColor(*node.name);
+    ImU32 color = nameToColor(node.name);
     drawList->AddRectFilled(p0, p1, color);
 
     // §6.2 — self cost 可视化（右侧高亮段）
@@ -62,7 +71,7 @@ void FlameView::drawNode(ImDrawList* drawList, const FlameNode& node, double t,
         float selfWidth = (float)(selfCost / zoomInclusive) * totalWidth;
         if (selfWidth > 1.0f) {
             ImVec2 selfP0(p1.x - selfWidth, p0.y);
-            ImU32 selfColor = nameToColor(*node.name, 0.2f); // 亮度 +20%
+            ImU32 selfColor = nameToColor(node.name, 0.2f); // 亮度 +20%
             drawList->AddRectFilled(selfP0, p1, selfColor);
         }
     }
@@ -79,7 +88,7 @@ void FlameView::drawNode(ImDrawList* drawList, const FlameNode& node, double t,
 
         // §6.3 — Tooltip
         ImGui::BeginTooltip();
-        ImGui::Text("Name: %s", node.name->c_str());
+        ImGui::Text("Name: %s", node.name ? node.name->c_str() : "(null)");
         ImGui::Text("Self: %.3f", selfCost);
         ImGui::Text("Inclusive: %.3f", nodeInclusive);
         if (rootInclusive > 0.0) {
@@ -97,7 +106,7 @@ void FlameView::drawNode(ImDrawList* drawList, const FlameNode& node, double t,
     }
 
     // 绘制文本（如果宽度足够）
-    if (blockWidth > 30.0f) {
+    if (blockWidth > 30.0f && node.name) {
         ImVec2 textSize = ImGui::CalcTextSize(node.name->c_str());
         if (textSize.x < blockWidth - 4.0f) {
             drawList->AddText(ImVec2(p0.x + 2.0f, p0.y + (BLOCK_HEIGHT - textSize.y) * 0.5f),
@@ -155,7 +164,7 @@ void FlameView::drawNodeDiff(ImDrawList* drawList, const FlameNode& node, double
 
     // 文字标签
     {
-        const char* label = node.name->c_str();
+        const char* label = node.name ? node.name->c_str() : "(null)";
         ImVec2 textSize = ImGui::CalcTextSize(label);
         if (textSize.x + 4.0f < blockWidth) {
             float textX = x + 2.0f;
@@ -174,7 +183,7 @@ void FlameView::drawNodeDiff(ImDrawList* drawList, const FlameNode& node, double
         double selfVal1 = query(node, t1);
 
         ImGui::BeginTooltip();
-        ImGui::Text("Name:       %s", node.name->c_str());
+        ImGui::Text("Name:       %s", node.name ? node.name->c_str() : "(null)");
         ImGui::Separator();
         ImGui::Text("Self(t0):   %.2f  -> Self(t1):   %.2f  [%+.2f]", selfVal0, selfVal1, selfVal1 - selfVal0);
         ImGui::Text("Incl(t0):   %.2f  -> Incl(t1):   %.2f  [%+.2f]", nodeIncl0, nodeIncl1, delta);
@@ -267,13 +276,13 @@ void FlameView::draw(const FlameNode& root, double t, ImVec2 canvasPos, float ca
                 ImVec2 p1(canvasPos.x + canvasWidth, blockY + BLOCK_HEIGHT);
 
                 // 用较暗的颜色绘制祖先
-                ImU32 color = nameToColor(*ancestor->name);
+                ImU32 color = nameToColor(ancestor->name);
                 // 半透明处理表示这是上下文
                 ImU32 dimColor = (color & 0x00FFFFFF) | 0xAA000000;
                 drawList->AddRectFilled(p0, p1, dimColor);
 
                 // 文字标签
-                const char* label = ancestor->name->c_str();
+                const char* label = ancestor->name ? ancestor->name->c_str() : "(null)";
                 ImVec2 textSize = ImGui::CalcTextSize(label);
                 if (textSize.x + 4.0f < canvasWidth) {
                     float textX = canvasPos.x + 2.0f;
@@ -288,7 +297,7 @@ void FlameView::draw(const FlameNode& root, double t, ImVec2 canvasPos, float ca
                     drawList->AddRect(p0, p1, IM_COL32(255, 255, 255, 255), 0.0f, 0, 2.0f);
 
                     ImGui::BeginTooltip();
-                    ImGui::Text("Name:       %s", ancestor->name->c_str());
+                    ImGui::Text("Name:       %s", ancestor->name ? ancestor->name->c_str() : "(null)");
                     ImGui::Text("Self cost:  %.2f", ancestorSelf);
                     ImGui::Text("Inclusive:   %.2f", ancestorIncl);
                     ImGui::Text("%% of root:  %.1f%%", (ancestorIncl / rootIncl) * 100.0);
@@ -377,7 +386,7 @@ void FlameView::drawDiff(const FlameNode& root, double t0, double t1,
                 ImU32 dimColor = (color & 0x00FFFFFF) | 0xAA000000;
                 drawList->AddRectFilled(p0, p1, dimColor);
 
-                const char* label = ancestor->name->c_str();
+                const char* label = ancestor->name ? ancestor->name->c_str() : "(null)";
                 ImVec2 textSize = ImGui::CalcTextSize(label);
                 if (textSize.x + 4.0f < canvasWidth) {
                     float textX = canvasPos.x + 2.0f;
@@ -391,7 +400,7 @@ void FlameView::drawDiff(const FlameNode& root, double t0, double t1,
                     drawList->AddRect(p0, p1, IM_COL32(255, 255, 255, 255), 0.0f, 0, 2.0f);
 
                     ImGui::BeginTooltip();
-                    ImGui::Text("Name:      %s", ancestor->name->c_str());
+                    ImGui::Text("Name:      %s", ancestor->name ? ancestor->name->c_str() : "(null)");
                     ImGui::Text("Incl(t0):  %.2f", ancestorIncl0);
                     ImGui::Text("Incl(t1):  %.2f", ancestorIncl1);
                     ImGui::Text("Delta:     %+.2f", delta);
