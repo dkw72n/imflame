@@ -1,0 +1,33 @@
+{
+    "version": 6,
+    "configurePresets": [
+        {
+            "name": "vs2022-x64",
+            "displayName": "Visual Studio 2022 x64",
+            "description": "Visual Studio 17 2022 generator, x64 architecture",
+            "generator": "Visual Studio 17 2022",
+            "architecture": "x64",
+            "binaryDir": "${sourceDir}/build"
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "vs2022-x64-release",
+            "displayName": "Release",
+            "configurePreset": "vs2022-x64",
+            "configuration": "Release"
+        },
+        {
+            "name": "vs2022-x64-debug",
+            "displayName": "Debug",
+            "configurePreset": "vs2022-x64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "vs2022-x64-relwithdebinfo",
+            "displayName": "RelWithDebInfo",
+            "configurePreset": "vs2022-x64",
+            "configuration": "RelWithDebInfo"
+        }
+    ]
+}

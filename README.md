@@ -45,7 +45,15 @@ cmake ..
 cmake --build . --config Release
 ```
 
-### Windows (Visual Studio)
+### Windows (Visual Studio) - 使用 CMakePresets (推荐)
+
+```bash
+# 使用预设配置（推荐）
+cmake --preset vs2022-x64
+cmake --build --preset vs2022-x64-release
+```
+
+### Windows (Visual Studio) - 传统方式
 
 ```bash
 mkdir build
