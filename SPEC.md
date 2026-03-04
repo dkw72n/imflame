@@ -252,3 +252,36 @@ Change:     +50.0%
 
 ### 用例 8：Diff 模式
 在时间序列曲线区域按住 Shift + 左键拖拽选取 `t0=0.5, t1=2.0` → 火焰图切换为 Diff 模式 → 色块尺寸按 `t1=2.0` 绘制 → 节点颜色反映 `inclusive(t1) - inclusive(t0)` 差值：增长的节点显示红色，减少的显示蓝色，无变化的显示灰色 → 悬停 Tooltip 显示 `t0`/`t1` 的 Self/Inclusive 对比及 Delta 信息 → 按 Escape 取消选区回到普通模式
+
+## 10. 开屏界面与加载进度
+
+### 10.1 设计目标
+
+程序启动时立即显示窗口和加载界面，避免大文件加载时长时间黑屏等待。
+
+### 10.2 加载流程
+
+1. 初始化 GLFW 和 ImGui 上下文
+2. 创建窗口并进入**开屏循环**
+3. 在开屏循环中启动**后台线程**异步加载数据
+4. 后台线程使用 `std::async` + `std::future` 执行 `loadFlameData()`
+5. 主线程渲染加载界面并轮询 `std::future` 状态
+6. 加载完成后进入**主循环**
+
+### 10.3 进度条实现
+
+- **SAX 流式解析**：`nlohmann::json::sax_parse` 支持流式解析，无需一次性加载整个 JSON 到内存
+- **字节位置轮询**：启动独立的 `ProgressPoller` 线程，每 50ms 检查 `std::ifstream::tellg()` 获取当前读取位置
+- **进度计算**：`progress = current_position / total_file_size`，最大显示 95%（剩余 5% 用于解析完成后的数据处理）
+- **回调机制**：`ProgressCallback` 类型为 `std::function<void(double)>`，进度更新时直接调用回调函数
+
+### 10.4 UI 展示
+
+- 全屏深色背景 (RGB: 24, 24, 24)
+- 居中加载内容窗口，包含：
+  - "Loading data..." 文字
+  - 进度条（蓝色，ImGui ProgressBar）
+  - 百分比显示
+  - 当前加载的文件路径
+- 加载完成后自动切换到主界面
+- 加载失败时打印错误信息到控制台并退出

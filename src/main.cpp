@@ -13,6 +13,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <thread>
+#include <atomic>
+#include <future>
 
 static void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
@@ -23,16 +26,6 @@ int main(int argc, char* argv[]) {
     std::string dataFile = "data/sample.json";
     if (argc > 1) {
         dataFile = argv[1];
-    }
-
-    // 加载数据
-    FlameNode root;
-    try {
-        root = loadFlameData(dataFile);
-        printf("Loaded flame data from: %s\n", dataFile.c_str());
-    } catch (const std::exception& e) {
-        fprintf(stderr, "Error loading data: %s\n", e.what());
-        return 1;
     }
 
     // 初始化 GLFW
@@ -80,10 +73,118 @@ int main(int argc, char* argv[]) {
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
-    // 初始化视图
+    // === 开屏界面：使用后台线程加载数据 ===
+    // 使用 std::future 在后台线程加载数据
+    std::future<FlameNode> loadFuture;
+    FlameNode root; // 声明在外部作用域
+    bool loadingStarted = false;
+    bool dataReady = false;
+    std::string loadError;
+    // 进度值（0.0 ~ 1.0）
+    double currentProgress = 0.0;
+
+    while (!dataReady && !glfwWindowShouldClose(window)) {
+        glfwPollEvents();
+
+        // 如果加载还没开始，启动后台线程
+        if (!loadingStarted) {
+            loadingStarted = true;
+            loadFuture = std::async(std::launch::async, [&dataFile, &currentProgress]() {
+                FlameNode result = loadFlameData(dataFile, [&currentProgress](double p) {
+                    currentProgress = p;
+                });
+                return result;
+            });
+        }
+
+        // 检查加载是否完成
+        if (loadFuture.wait_for(std::chrono::milliseconds(16)) == std::future_status::ready) {
+            try {
+                root = loadFuture.get();
+                printf("Loaded flame data from: %s\n", dataFile.c_str());
+                dataReady = true;
+            } catch (const std::exception& e) {
+                loadError = e.what();
+                dataReady = true;
+            }
+        }
+
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        // 全屏背景窗口
+        ImGuiViewport* viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(viewport->WorkPos);
+        ImGui::SetNextWindowSize(viewport->WorkSize);
+        ImGui::Begin("##SplashBg", nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+            ImGuiWindowFlags_NoBringToFrontOnFocus);
+
+        // 居中的加载内容窗口
+        ImVec2 center = viewport->GetCenter();
+        ImGui::SetNextWindowPos(ImVec2(center.x, center.y), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(400, 150));
+        ImGui::Begin("##LoadingContent", nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBackground);
+
+        // 加载文字
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Loading data...").x) * 0.5f);
+        ImGui::Text("Loading data...");
+        ImGui::Spacing();
+        ImGui::Spacing();
+
+        // 实际进度条
+        ImGui::SetNextItemWidth(300);
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.4f, 0.7f, 0.9f, 1.0f));
+        ImGui::ProgressBar(currentProgress, ImVec2(0.0f, 0.0f), "");
+        ImGui::PopStyleColor();
+
+        // 显示百分比
+        char progressText[32];
+        snprintf(progressText, sizeof(progressText), "%.0f%%", currentProgress * 100.0f);
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize(progressText).x) * 0.5f);
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "%s", progressText);
+
+        ImGui::Spacing();
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize(dataFile.c_str()).x) * 0.5f);
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "%s", dataFile.c_str());
+
+        ImGui::End();
+        ImGui::End();
+
+        // 渲染加载界面
+        ImGui::Render();
+        int displayW, displayH;
+        glfwGetFramebufferSize(window, &displayW, &displayH);
+        glViewport(0, 0, displayW, displayH);
+        glClearColor(24.0f / 255.0f, 24.0f / 255.0f, 24.0f / 255.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        glfwSwapBuffers(window);
+    }
+
+    // 如果加载失败，显示错误并退出
+    if (!loadError.empty()) {
+        // 直接在控制台打印错误信息，然后退出
+        fprintf(stderr, "Error loading data: %s\n", loadError.c_str());
+
+        // 清理
+        ImGui_ImplOpenGL3_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImPlot::DestroyContext();
+        ImGui::DestroyContext();
+        glfwDestroyWindow(window);
+        glfwTerminate();
+
+        return 1;
+    }
+
+    // 数据加载成功，初始化视图
     TimelineView timelineView;
     timelineView.init(root);
-
     FlameView flameView;
 
     // 分隔条位置（时序图占用的比例，0.0 ~ 1.0）

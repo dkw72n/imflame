@@ -6,6 +6,9 @@
 #include <string>
 #include <algorithm>
 #include <unordered_set>
+#include <atomic>
+#include <thread>
+#include <chrono>
 
 using json = nlohmann::json;
 
@@ -30,6 +33,41 @@ static StringPool& getGlobalStringPool() {
     static StringPool pool;
     return pool;
 }
+
+// 带进度轮询的 SAX 解析器包装
+// 在单独的线程中定期检查文件读取位置来更新进度
+class ProgressPoller {
+public:
+    ProgressPoller(std::istream* is, ProgressCallback callback, std::streamsize totalSize)
+        : is_(is), callback_(std::move(callback)), totalSize_(totalSize), running_(true) {
+        thread_ = std::thread([this]() {
+            while (running_) {
+                if (is_ && callback_ && totalSize_ > 0) {
+                    std::streampos pos = is_->tellg();
+                    if (pos >= 0) {
+                        double p = std::min(0.95, static_cast<double>(pos) / static_cast<double>(totalSize_));
+                        callback_(p);
+                    }
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        });
+    }
+
+    ~ProgressPoller() {
+        running_ = false;
+        if (thread_.joinable()) {
+            thread_.join();
+        }
+    }
+
+private:
+    std::istream* is_;
+    ProgressCallback callback_;
+    std::streamsize totalSize_;
+    std::atomic<bool> running_;
+    std::thread thread_;
+};
 
 class FlameNodeSax : public nlohmann::json_sax<json> {
 public:
@@ -180,16 +218,33 @@ static FlameNode convertTempNode(FlameNodeSax::TempNode&& temp) {
     return node;
 }
 
-FlameNode loadFlameData(const std::string& filepath) {
+FlameNode loadFlameData(const std::string& filepath, ProgressCallback progressCallback) {
     std::ifstream ifs(filepath);
     if (!ifs.is_open()) {
         throw std::runtime_error("Cannot open file: " + filepath);
     }
-    
+
+    // 获取文件大小
+    ifs.seekg(0, std::ios::end);
+    std::streamsize totalSize = ifs.tellg();
+    ifs.seekg(0, std::ios::beg);
+
+    // 启动进度轮询线程
+    std::unique_ptr<ProgressPoller> poller;
+    if (progressCallback) {
+        poller = std::make_unique<ProgressPoller>(&ifs, progressCallback, totalSize);
+    }
+
     FlameNodeSax sax;
     bool success = json::sax_parse(ifs, &sax);
+    
     if (!success) {
         throw std::runtime_error("SAX parsing failed for file: " + filepath);
+    }
+    
+    // 报告最终进度
+    if (progressCallback) {
+        progressCallback(1.0);
     }
     
     return convertTempNode(std::move(sax.result));
