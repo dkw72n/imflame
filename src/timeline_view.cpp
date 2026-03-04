@@ -77,6 +77,12 @@ TimelineView::CurveData TimelineView::buildInclusiveCurveAsync(const FlameNode& 
 
     if (cancelFlag.load(std::memory_order_relaxed)) return {};
 
+    // 如果节点曲线提前结束，追加一个点到时间轴最后，保持前值，使阶梯线延伸到最后
+    if (maxTime_ > minTime_ && !curve.times.empty() && curve.times.back() < maxTime_) {
+        curve.times.push_back(maxTime_);
+        curve.values.push_back(curve.values.back());
+    }
+
     // §7.3 — 曲线数据降采样 (LOD)
     constexpr size_t MAX_POINTS = 4000;
     if (curve.times.size() > MAX_POINTS) {
