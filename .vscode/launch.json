@@ -8,7 +8,6 @@
             "program": "${workspaceFolder}\\build\\Debug\\imflame.exe",
             "args": [],
             "cwd": "${workspaceFolder}",
-            "console": "externalTerminal",
             "preLaunchTask": "C/C++: build Debug"
         },
         {
@@ -20,7 +19,6 @@
                 "data/sample.json"
             ],
             "cwd": "${workspaceFolder}",
-            "console": "externalTerminal",
             "preLaunchTask": "C/C++: build Debug"
         },
         {
@@ -30,7 +28,6 @@
             "program": "${workspaceFolder}\\build\\Release\\imflame.exe",
             "args": [],
             "cwd": "${workspaceFolder}",
-            "console": "externalTerminal",
             "preLaunchTask": "C/C++: build Release"
         }
     ]
