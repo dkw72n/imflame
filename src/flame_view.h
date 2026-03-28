@@ -21,6 +21,10 @@ public:
 
     // 重置缩放（回到全局视图）
     void resetZoom() { zoomedNode_ = nullptr; zoomPath_.clear(); }
+    
+private:
+    // §8.4 — 清除缓存并准备新帧
+    void beginFrame(const FlameNode& root, double t);
 
 private:
     static constexpr float BLOCK_HEIGHT = 24.0f; // §6.1 — 色块高度固定 24px

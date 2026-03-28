@@ -21,13 +21,29 @@ double query(const FlameNode& node, double t) {
     return it->value;
 }
 
-// §2.4 — inclusive cost 递归计算
+// §2.4 — inclusive cost 递归计算（带缓存优化）
 double inclusive(const FlameNode& node, double t) {
+    if (node.cachedTime == t && node.cachedInclusive >= 0) {
+        return node.cachedInclusive;
+    }
+    
     double cost = query(node, t);
     for (uint32_t i = 0; i < node.child_count; ++i) {
         cost += inclusive(node.children[i], t);
     }
+    
+    node.cachedTime = t;
+    node.cachedInclusive = cost;
     return cost;
+}
+
+// §8.4 — 清除 inclusive 缓存（每帧开始前调用）
+void clearInclusiveCache(FlameNode& node) {
+    node.cachedTime = -1.0;
+    node.cachedInclusive = -1.0;
+    for (uint32_t i = 0; i < node.child_count; ++i) {
+        clearInclusiveCache(node.children[i]);
+    }
 }
 
 // §5.1 — 收集全局时间点集合

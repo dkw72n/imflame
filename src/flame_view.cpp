@@ -2,6 +2,13 @@
 #include <cmath>
 #include <algorithm>
 
+// §8.4 — 清除缓存并准备新帧
+void FlameView::beginFrame(const FlameNode& root, double t) {
+    (void)t; // 普通模式不需要清除缓存，因为 cache 通过时间戳验证
+    // Diff 模式需要清除缓存，因为涉及 t0/t1 两个时间点
+    clearInclusiveCache(const_cast<FlameNode&>(root));
+}
+
 // §6.2 — Self 高亮功能开关（默认关闭）
 #define IMFLAME_ENABLE_SELF_HIGHLIGHT 0
 
@@ -255,6 +262,9 @@ ImU32 FlameView::diffColor(double normalizedDelta) {
 
 // 绘制火焰图
 void FlameView::draw(const FlameNode& root, double t, ImVec2 canvasPos, float canvasWidth) {
+    // §8.4 — 清除缓存，准备新帧
+    beginFrame(root, t);
+    
     double rootIncl = inclusive(root, t);
 
     // §9 用例 6 — 零值处理
@@ -357,6 +367,9 @@ void FlameView::draw(const FlameNode& root, double t, ImVec2 canvasPos, float ca
 // 绘制Diff模式的火焰图
 void FlameView::drawDiff(const FlameNode& root, double t0, double t1, 
                           ImVec2 canvasPos, float canvasWidth) {
+    // §8.4 — 清除缓存，准备新帧（Diff 模式有两个时间点，必须清除）
+    beginFrame(root, t1);
+
     // 节点尺寸按 t1 绘制
     double rootInclT1 = inclusive(root, t1);
 
